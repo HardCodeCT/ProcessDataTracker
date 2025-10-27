@@ -1,86 +1,45 @@
 name: Build ProcessDataTracker Driver
-
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
-
 jobs:
   build-driver:
-    runs-on: windows-2022  # Specific Windows version
-    
+    runs-on: windows-2022 # Specific Windows version
+   
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
-
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
-
-    - name: Install Windows SDK and WDK
+    - name: Verify Windows SDK and WDK
       shell: powershell
       run: |
-        Write-Host "=== Installing Windows SDK and WDK ===" -ForegroundColor Cyan
-        
-        # Install chocolatey packages for WDK dependencies
-        Write-Host "`nInstalling prerequisites via Chocolatey..." -ForegroundColor Yellow
-        choco install -y windows-sdk-10-version-2004-all
-        
-        # Download and install WDK
-        Write-Host "`nDownloading WDK installer..." -ForegroundColor Yellow
-        $wdkUrl = "https://go.microsoft.com/fwlink/?linkid=2249371"
-        $installerPath = "$env:TEMP\wdksetup.exe"
-        
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $wdkUrl -OutFile $installerPath -UseBasicParsing
-        Write-Host "✓ WDK installer downloaded" -ForegroundColor Green
-        
-        # Run installer with verbose logging
-        Write-Host "`nInstalling WDK (15-20 minutes)..." -ForegroundColor Yellow
-        $logPath = "$env:TEMP\wdk_install.log"
-        
-        $arguments = @(
-            "/features", "+",
-            "/quiet",
-            "/norestart",
-            "/log", $logPath
-        )
-        
-        $process = Start-Process -FilePath $installerPath -ArgumentList $arguments -Wait -PassThru
-        
-        Write-Host "`nWDK Installation exit code: $($process.ExitCode)" -ForegroundColor $(if($process.ExitCode -eq 0){'Green'}else{'Red'})
-        
-        # Show installation log tail if it exists
-        if (Test-Path $logPath) {
-            Write-Host "`nLast 20 lines of installation log:" -ForegroundColor Yellow
-            Get-Content $logPath -Tail 20
-        }
-        
-        # Verify installation
-        Write-Host "`n=== Verifying WDK Installation ===" -ForegroundColor Cyan
+        Write-Host "=== Verifying Windows SDK and WDK ===" -ForegroundColor Cyan
         $wdkPath = "C:\Program Files (x86)\Windows Kits\10"
-        
+       
         if (Test-Path $wdkPath) {
             Write-Host "✓ WDK directory found" -ForegroundColor Green
-            
+           
             # List available SDK versions
             $includePath = Join-Path $wdkPath "Include"
             if (Test-Path $includePath) {
                 $versions = Get-ChildItem $includePath -Directory | Where-Object { $_.Name -match "10\.0\.\d+" }
                 Write-Host "`nAvailable SDK versions:" -ForegroundColor Yellow
                 foreach ($ver in $versions) {
-                    Write-Host "  - $($ver.Name)" -ForegroundColor White
-                    
+                    Write-Host " - $($ver.Name)" -ForegroundColor White
+                   
                     # Check for critical files
                     $ntddkPath = Join-Path $ver.FullName "km\ntddk.h"
                     $fwpskPath = Join-Path $ver.FullName "km\fwpsk.h"
-                    
-                    if (Test-Path $ntddkPath) { Write-Host "    ✓ ntddk.h found" -ForegroundColor Green }
-                    if (Test-Path $fwpskPath) { Write-Host "    ✓ fwpsk.h found" -ForegroundColor Green }
+                   
+                    if (Test-Path $ntddkPath) { Write-Host " ✓ ntddk.h found" -ForegroundColor Green }
+                    if (Test-Path $fwpskPath) { Write-Host " ✓ fwpsk.h found" -ForegroundColor Green }
                 }
             }
-            
+           
             # Check for libraries
             $libPath = Join-Path $wdkPath "Lib"
             if (Test-Path $libPath) {
@@ -88,19 +47,19 @@ jobs:
                 if ($libVersions) {
                     $latestLib = $libVersions | Sort-Object Name -Descending | Select-Object -First 1
                     $x64LibPath = Join-Path $latestLib.FullName "km\x64"
-                    
+                   
                     if (Test-Path $x64LibPath) {
                         Write-Host "`n✓ x64 kernel libraries found at:" -ForegroundColor Green
-                        Write-Host "  $x64LibPath" -ForegroundColor White
-                        
+                        Write-Host " $x64LibPath" -ForegroundColor White
+                       
                         # List key libraries
-                        $keyLibs = @("ntoskrnl.lib", "hal.lib", "fwpkclnt.lib")
+                        $keyLibs = @("ntoskrnl.lib", "hal.lib", "fwpkclnt.lib", "wdmsec.lib")
                         foreach ($lib in $keyLibs) {
                             $libFile = Join-Path $x64LibPath $lib
                             if (Test-Path $libFile) {
-                                Write-Host "  ✓ $lib" -ForegroundColor Green
+                                Write-Host " ✓ $lib" -ForegroundColor Green
                             } else {
-                                Write-Host "  ✗ $lib missing" -ForegroundColor Red
+                                Write-Host " ✗ $lib missing" -ForegroundColor Red
                             }
                         }
                     }
@@ -110,71 +69,70 @@ jobs:
             Write-Error "✗ WDK installation failed - directory not found"
             exit 1
         }
-        
-        Write-Host "`n=== WDK Installation Complete ===" -ForegroundColor Cyan
-
+       
+        Write-Host "`n=== WDK Verification Complete ===" -ForegroundColor Cyan
     - name: Build Driver
       shell: powershell
       run: |
         Write-Host "=== Building ProcessDataTracker Driver ===" -ForegroundColor Cyan
-        
+       
         # Locate WDK
         $wdkPath = "C:\Program Files (x86)\Windows Kits\10"
         $includePath = Join-Path $wdkPath "Include"
         $libBasePath = Join-Path $wdkPath "Lib"
-        
+       
         # Find latest SDK version
-        $sdkVersions = Get-ChildItem $includePath -Directory | 
-            Where-Object { $_.Name -match "10\.0\.\d+\.\d+" } | 
+        $sdkVersions = Get-ChildItem $includePath -Directory |
+            Where-Object { $_.Name -match "10\.0\.\d+\.\d+" } |
             Sort-Object Name -Descending
-        
+       
         if (-not $sdkVersions) {
             Write-Error "No SDK versions found"
             exit 1
         }
-        
+       
         $sdkVersion = $sdkVersions[0].Name
         Write-Host "`nUsing SDK version: $sdkVersion" -ForegroundColor Yellow
-        
+       
         # Build paths
         $kmInclude = Join-Path $wdkPath "Include\$sdkVersion\km"
-        $sharedInclude = Join-Path $wdkPath "Include\$sdkVersion\shared"  
+        $sharedInclude = Join-Path $wdkPath "Include\$sdkVersion\shared"
         $umInclude = Join-Path $wdkPath "Include\$sdkVersion\um"
         $libPath = Join-Path $wdkPath "Lib\$sdkVersion\km\x64"
-        
+       
         # Verify paths
         Write-Host "`nVerifying build paths..." -ForegroundColor Yellow
         $allPathsValid = $true
         foreach ($path in @($kmInclude, $sharedInclude, $umInclude, $libPath)) {
             if (Test-Path $path) {
-                Write-Host "  ✓ $path" -ForegroundColor Green
+                Write-Host " ✓ $path" -ForegroundColor Green
             } else {
-                Write-Host "  ✗ $path" -ForegroundColor Red
+                Write-Host " ✗ $path" -ForegroundColor Red
                 $allPathsValid = $false
             }
         }
-        
+       
         if (-not $allPathsValid) {
             Write-Error "Some required paths are missing"
             exit 1
         }
-        
+       
         # Find Visual Studio
         Write-Host "`nLocating Visual Studio..." -ForegroundColor Yellow
         $vsPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
             -latest -property installationPath
-        
+       
         if (-not $vsPath) {
             Write-Error "Visual Studio not found"
             exit 1
         }
-        
+       
         $vcvarsPath = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
         Write-Host "✓ Found vcvars64.bat at: $vcvarsPath" -ForegroundColor Green
-        
+       
         # Create build batch file
         Write-Host "`nCreating build script..." -ForegroundColor Yellow
-        
+       
         $buildBat = @"
 @echo off
 echo.
@@ -184,7 +142,6 @@ if errorlevel 1 (
     echo Failed to set up Visual Studio environment
     exit /b 1
 )
-
 echo.
 echo === Compiling ProcessDataTracker.c ===
 cl.exe /c /nologo /W3 /O2 /D NDEBUG /D _WIN64 /D _AMD64_ /D AMD64 ^
@@ -193,12 +150,10 @@ cl.exe /c /nologo /W3 /O2 /D NDEBUG /D _WIN64 /D _AMD64_ /D AMD64 ^
     /wd4201 /wd4214 /wd4100 /wd4115 /wd4127 /wd4131 ^
     /I"$kmInclude" /I"$sharedInclude" /I"$umInclude" ^
     ProcessDataTracker.c
-
 if errorlevel 1 (
     echo Compilation failed!
     exit /b 1
 )
-
 echo.
 echo === Linking driver ===
 link.exe /NOLOGO /OUT:"ProcessDataTracker.sys" ^
@@ -207,28 +162,26 @@ link.exe /NOLOGO /OUT:"ProcessDataTracker.sys" ^
     /LIBPATH:"$libPath" ^
     ntoskrnl.lib hal.lib wdmsec.lib fwpkclnt.lib ^
     ProcessDataTracker.obj
-
 if errorlevel 1 (
     echo Linking failed!
     exit /b 1
 )
-
 echo.
 echo === Build successful! ===
 dir ProcessDataTracker.sys
 "@
-        
+       
         $buildBat | Out-File -FilePath "build.bat" -Encoding ASCII
-        
+       
         # Execute build
         Write-Host "`n=== Executing Build ===" -ForegroundColor Cyan
         cmd /c build.bat
-        
+       
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Build failed with exit code $LASTEXITCODE"
             exit 1
         }
-        
+       
         # Verify output
         if (Test-Path "ProcessDataTracker.sys") {
             $driverFile = Get-Item "ProcessDataTracker.sys"
@@ -239,22 +192,21 @@ dir ProcessDataTracker.sys
             Write-Error "Driver file not created"
             exit 1
         }
-
     - name: Upload Driver Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ProcessDataTracker-x64
         path: ProcessDataTracker.sys
         if-no-files-found: error
-        
+       
     - name: Build Summary
       if: always()
       shell: powershell
       run: |
         Write-Host "`n========================================" -ForegroundColor Cyan
-        Write-Host "         BUILD SUMMARY" -ForegroundColor Cyan
+        Write-Host " BUILD SUMMARY" -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
-        
+       
         if (Test-Path "ProcessDataTracker.sys") {
             $file = Get-Item "ProcessDataTracker.sys"
             Write-Host "✓ Status: SUCCESS" -ForegroundColor Green
@@ -265,5 +217,5 @@ dir ProcessDataTracker.sys
             Write-Host "✗ Status: FAILED" -ForegroundColor Red
             Write-Host "✗ Driver file not generated" -ForegroundColor Red
         }
-        
+       
         Write-Host "========================================`n" -ForegroundColor Cyan
