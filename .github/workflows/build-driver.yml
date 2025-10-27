@@ -182,45 +182,42 @@ jobs:
       - name: Sign Driver File
         shell: powershell
         run: |
-          $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\bin\10.0.26100.0\x64\signtool.exe"
-          if (Test-Path $signtool) {
-            & $signtool sign /v /s My /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com /sm ProcessDataTracker.sys
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "Driver file signed successfully"
-            } else {
-              Write-Warning "Signing completed with warnings. This is normal for test certificates."
-            }
-          } else {
-            Write-Error "SignTool.exe not found"
+          $signtoolPath = (Get-ChildItem -Path .\packages -Recurse -Filter "signtool.exe" -File | Where-Object { $_.FullName -like "*\x64\*" }) | Select-Object -First 1 | Select-Object -ExpandProperty FullName
+          if (-not $signtoolPath) {
+            Write-Error "SignTool.exe not found in packages"
             exit 1
+          }
+          & $signtoolPath sign /v /sm /s My /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com ProcessDataTracker.sys
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Driver file signed successfully"
+          } else {
+            Write-Warning "Signing completed with warnings. This is normal for test certificates."
           }
 
       - name: Create Catalog File
         shell: powershell
         run: |
-          $inf2cat = "packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\tools\x64\inf2cat.exe"
-          if (Test-Path $inf2cat) {
-            & $inf2cat /driver:. /os:10_X64,Server10_X64
-            Write-Host "Catalog file created successfully"
-          } else {
-            Write-Error "Inf2Cat.exe not found"
+          $inf2catPath = (Get-ChildItem -Path .\packages -Recurse -Filter "inf2cat.exe" -File | Where-Object { $_.FullName -like "*\x64\*" }) | Select-Object -First 1 | Select-Object -ExpandProperty FullName
+          if (-not $inf2catPath) {
+            Write-Error "Inf2Cat.exe not found in packages"
             exit 1
           }
+          & $inf2catPath /driver:. /os:10_X64,Server10_X64
+          Write-Host "Catalog file created successfully"
 
       - name: Sign Catalog File
         shell: powershell
         run: |
-          $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\bin\10.0.26100.0\x64\signtool.exe"
-          if (Test-Path $signtool) {
-            & $signtool sign /v /s My /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com /sm ProcessDataTracker.cat
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "Catalog file signed successfully"
-            } else {
-              Write-Warning "Signing completed with warnings. This is normal for test certificates."
-            }
-          } else {
-            Write-Error "SignTool.exe not found"
+          $signtoolPath = (Get-ChildItem -Path .\packages -Recurse -Filter "signtool.exe" -File | Where-Object { $_.FullName -like "*\x64\*" }) | Select-Object -First 1 | Select-Object -ExpandProperty FullName
+          if (-not $signtoolPath) {
+            Write-Error "SignTool.exe not found in packages"
             exit 1
+          }
+          & $signtoolPath sign /v /sm /s My /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com ProcessDataTracker.cat
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Catalog file signed successfully"
+          } else {
+            Write-Warning "Signing completed with warnings. This is normal for test certificates."
           }
 
       - name: Export Certificate
