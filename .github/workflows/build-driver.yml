@@ -1,4 +1,4 @@
-name: Build ProcessDataSaver Driver
+name: Build ProcessDataTracker Driver
 on:
   push:
     branches: [ main, master ]
@@ -89,25 +89,25 @@ jobs:
             </Link>
           </ItemDefinitionGroup>
           <ItemGroup>
-            <ClCompile Include="processdatasaver.c" />
+            <ClCompile Include="ProcessDataTracker.c" />
           </ItemGroup>
           <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-            <TargetName>processdatasaver</TargetName>
+            <TargetName>ProcessDataTracker</TargetName>
             <TargetExt>.sys</TargetExt>
           </PropertyGroup>
           <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
         </Project>
         '@
-        $vcxproj | Out-File -FilePath "processdatasaver.vcxproj" -Encoding ASCII
+        $vcxproj | Out-File -FilePath "ProcessDataTracker.vcxproj" -Encoding ASCII
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
     - name: Build Driver
-      run: msbuild processdatasaver.vcxproj /p:Configuration=Release /p:Platform=x64
+      run: msbuild ProcessDataTracker.vcxproj /p:Configuration=Release /p:Platform=x64
     - name: Upload Driver Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: processdatasaver-x64
-        path: x64/Release/processdatasaver.sys
+        name: ProcessDataTracker-x64
+        path: x64/Release/ProcessDataTracker.sys
         if-no-files-found: error
     - name: Build Summary
       if: always()
@@ -117,10 +117,10 @@ jobs:
         Write-Host " BUILD SUMMARY" -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
        
-        if (Test-Path "x64/Release/processdatasaver.sys") {
-            $file = Get-Item "x64/Release/processdatasaver.sys"
+        if (Test-Path "x64/Release/ProcessDataTracker.sys") {
+            $file = Get-Item "x64/Release/ProcessDataTracker.sys"
             Write-Host "✓ Status: SUCCESS" -ForegroundColor Green
-            Write-Host "✓ Driver: processdatasaver.sys" -ForegroundColor Green
+            Write-Host "✓ Driver: ProcessDataTracker.sys" -ForegroundColor Green
             Write-Host "✓ Size: $([math]::Round($file.Length/1KB, 2)) KB" -ForegroundColor Green
             Write-Host "`n📦 Download from 'Artifacts' section below" -ForegroundColor Yellow
         } else {
