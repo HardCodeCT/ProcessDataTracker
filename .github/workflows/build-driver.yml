@@ -1,0 +1,128 @@
+name: Build ProcessDataTracker Driver
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Manual trigger button
+
+jobs:
+  build-driver:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+    
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+    
+    - name: Install Windows SDK
+      shell: powershell
+      run: |
+        Write-Host "Downloading Windows SDK..."
+        $sdkUrl = "https://go.microsoft.com/fwlink/?linkid=2272610"
+        Invoke-WebRequest -Uri $sdkUrl -OutFile "$env:TEMP\sdksetup.exe"
+        
+        Write-Host "Installing Windows SDK (this may take 5-10 minutes)..."
+        Start-Process -Wait -FilePath "$env:TEMP\sdksetup.exe" -ArgumentList "/quiet", "/norestart", "/features", "OptionId.WindowsDesktopDebuggers"
+        
+        Write-Host "Windows SDK installed successfully"
+    
+    - name: Install WDK
+      shell: powershell
+      run: |
+        Write-Host "Downloading WDK..."
+        $wdkUrl = "https://go.microsoft.com/fwlink/?linkid=2272610"
+        Invoke-WebRequest -Uri $wdkUrl -OutFile "$env:TEMP\wdksetup.exe"
+        
+        Write-Host "Installing WDK (this may take 10-15 minutes)..."
+        Start-Process -Wait -FilePath "$env:TEMP\wdksetup.exe" -ArgumentList "/quiet", "/norestart"
+        
+        Write-Host "WDK installed successfully"
+    
+    - name: Build Driver (x64)
+      shell: cmd
+      run: |
+        echo Building ProcessDataTracker driver...
+        
+        set WDK_PATH=C:\Program Files (x86)\Windows Kits\10
+        set SDK_VERSION=10.0.22621.0
+        
+        REM Set up build environment
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        
+        REM Include paths
+        set INCLUDE_PATHS=/I"%WDK_PATH%\Include\%SDK_VERSION%\km" /I"%WDK_PATH%\Include\%SDK_VERSION%\shared" /I"%WDK_PATH%\Include\%SDK_VERSION%\um"
+        
+        REM Library paths
+        set LIB_PATHS=/LIBPATH:"%WDK_PATH%\Lib\%SDK_VERSION%\km\x64"
+        
+        REM Compile the driver
+        cl.exe /c /nologo /W3 /WX- /O2 /Oi /GL /D NDEBUG /D _WIN64 /D _AMD64_ /D AMD64 /D _KERNEL_MODE /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /GR- /Fo"ProcessDataTracker.obj" /Fd"ProcessDataTracker.pdb" /kernel /Gd /wd4201 /wd4214 /wd4100 %INCLUDE_PATHS% ProcessDataTracker.c
+        
+        REM Link the driver
+        link.exe /DRIVER /KERNEL /NOLOGO /OUT:"ProcessDataTracker.sys" /SUBSYSTEM:NATIVE /DYNAMICBASE:NO /NODEFAULTLIB /ENTRY:DriverEntry /RELEASE /INCREMENTAL:NO /OPT:REF /OPT:ICF /LTCG %LIB_PATHS% ntoskrnl.lib hal.lib wdmsec.lib fwpkclnt.lib ProcessDataTracker.obj
+        
+        echo Build completed!
+        dir *.sys
+    
+    - name: Upload Driver Artifact (x64)
+      uses: actions/upload-artifact@v3
+      with:
+        name: ProcessDataTracker-x64
+        path: ProcessDataTracker.sys
+        if-no-files-found: error
+    
+    - name: Build Driver (x86) - Optional
+      shell: cmd
+      continue-on-error: true
+      run: |
+        echo Building ProcessDataTracker driver for x86...
+        
+        set WDK_PATH=C:\Program Files (x86)\Windows Kits\10
+        set SDK_VERSION=10.0.22621.0
+        
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+        
+        set INCLUDE_PATHS=/I"%WDK_PATH%\Include\%SDK_VERSION%\km" /I"%WDK_PATH%\Include\%SDK_VERSION%\shared" /I"%WDK_PATH%\Include\%SDK_VERSION%\um"
+        set LIB_PATHS=/LIBPATH:"%WDK_PATH%\Lib\%SDK_VERSION%\km\x86"
+        
+        cl.exe /c /nologo /W3 /WX- /O2 /Oi /GL /D NDEBUG /D _X86_ /D i386 /D _KERNEL_MODE /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /GR- /Fo"ProcessDataTracker_x86.obj" /Fd"ProcessDataTracker_x86.pdb" /kernel /Gd /wd4201 /wd4214 /wd4100 %INCLUDE_PATHS% ProcessDataTracker.c
+        
+        link.exe /DRIVER /KERNEL /NOLOGO /OUT:"ProcessDataTracker_x86.sys" /SUBSYSTEM:NATIVE /DYNAMICBASE:NO /NODEFAULTLIB /ENTRY:DriverEntry /RELEASE /INCREMENTAL:NO /OPT:REF /OPT:ICF /LTCG %LIB_PATHS% ntoskrnl.lib hal.lib wdmsec.lib fwpkclnt.lib ProcessDataTracker_x86.obj
+    
+    - name: Upload Driver Artifact (x86) - Optional
+      uses: actions/upload-artifact@v3
+      continue-on-error: true
+      with:
+        name: ProcessDataTracker-x86
+        path: ProcessDataTracker_x86.sys
+        if-no-files-found: warn
+    
+    - name: Build Summary
+      shell: powershell
+      run: |
+        Write-Host "===== BUILD SUMMARY ====="
+        Write-Host ""
+        if (Test-Path "ProcessDataTracker.sys") {
+          $fileInfo = Get-Item "ProcessDataTracker.sys"
+          Write-Host "✓ x64 Driver built successfully"
+          Write-Host "  File: ProcessDataTracker.sys"
+          Write-Host "  Size: $($fileInfo.Length) bytes"
+        } else {
+          Write-Host "✗ x64 Driver build failed"
+        }
+        Write-Host ""
+        if (Test-Path "ProcessDataTracker_x86.sys") {
+          $fileInfo = Get-Item "ProcessDataTracker_x86.sys"
+          Write-Host "✓ x86 Driver built successfully"
+          Write-Host "  File: ProcessDataTracker_x86.sys"
+          Write-Host "  Size: $($fileInfo.Length) bytes"
+        } else {
+          Write-Host "⚠ x86 Driver build skipped or failed"
+        }
+        Write-Host ""
+        Write-Host "Download artifacts from the Actions tab above"
+        Write-Host "========================="
