@@ -125,22 +125,22 @@ jobs:
             exit 1
         }
         
-        # Create build script
+        # Create build script with proper variable expansion
         $buildScript = @"
 @echo off
 echo Building ProcessDataTracker driver...
 
-set WDK_PATH=$wdkPath
-set SDK_VERSION=$sdkVersion
+set "WDK_PATH=$wdkPath"
+set "SDK_VERSION=$sdkVersion"
 
 REM Set up Visual Studio environment
 call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
 
 REM Include paths
-set INCLUDE_PATHS=/I"%WDK_PATH%\Include\%SDK_VERSION%\km" /I"%WDK_PATH%\Include\%SDK_VERSION%\shared" /I"%WDK_PATH%\Include\%SDK_VERSION%\um"
+set "INCLUDE_PATHS=/I"%WDK_PATH%\Include\%SDK_VERSION%\km" /I"%WDK_PATH%\Include\%SDK_VERSION%\shared" /I"%WDK_PATH%\Include\%SDK_VERSION%\um""
 
 REM Library paths
-set LIB_PATHS=/LIBPATH:"%WDK_PATH%\Lib\%SDK_VERSION%\km\x64"
+set "LIB_PATHS=/LIBPATH:"%WDK_PATH%\Lib\%SDK_VERSION%\km\x64""
 
 echo.
 echo Compiling driver...
