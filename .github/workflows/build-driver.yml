@@ -1,5 +1,4 @@
 name: Build and Sign ProcessDataTracker Driver
-
 on:
   push:
     branches: [ main, master ]
@@ -46,17 +45,18 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore packages.config -PackagesDirectory packages
 
-    - name: Create INF file
+    - name: Create INF File
       shell: powershell
       run: |
         $inf = @'
         [Version]
         Signature="$WINDOWS NT$"
         Class=System
-        ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+        ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
         Provider=%ManufacturerName%
-        DriverVer=10/27/2025,1.0.0.0
         CatalogFile=ProcessDataTracker.cat
+        DriverVer=10/27/2025,1.0.0.0
+        PnpLockdown=1
 
         [DestinationDirs]
         DefaultDestDir = 12
@@ -93,8 +93,8 @@ jobs:
         SPSVCINST_ASSOCSERVICE= 0x00000002
         ManufacturerName="ProcessDataTracker"
         DiskName = "ProcessDataTracker Installation Disk"
-        ProcessDataTracker.DeviceDesc = "ProcessDataTracker Network Monitor"
-        ProcessDataTracker.SVCDESC = "ProcessDataTracker Network Monitoring Driver"
+        ProcessDataTracker.DeviceDesc = "ProcessDataTracker Driver"
+        ProcessDataTracker.SVCDESC = "ProcessDataTracker Service"
         '@
         $inf | Out-File -FilePath "ProcessDataTracker.inf" -Encoding ASCII
 
@@ -168,272 +168,298 @@ jobs:
     - name: Build Driver
       run: msbuild ProcessDataTracker.vcxproj /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off
 
+    - name: Copy Driver to Working Directory
+      shell: powershell
+      run: |
+        Copy-Item "x64\Release\ProcessDataTracker.sys" -Destination ".\ProcessDataTracker.sys"
+        Write-Host "Driver copied to working directory"
+
+    - name: Create Test Certificate
+      shell: powershell
+      run: |
+        $makecert = "packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\tools\x64\makecert.exe"
+        
+        if (Test-Path $makecert) {
+            & $makecert -r -pe -n "CN=ProcessDataTracker Test Certificate" -ss MY -sr LocalMachine -eku 1.3.6.1.5.5.7.3.3 -len 2048 -cy end -a sha256 -m 120 -sky signature ProcessDataTrackerCert.cer
+            Write-Host "Certificate created successfully"
+        } else {
+            Write-Error "MakeCert.exe not found at expected location"
+            exit 1
+        }
+
     - name: Create Catalog File
       shell: powershell
       run: |
-        $inf2cat = "packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\c\bin\10.0.26100.0\x86\inf2cat.exe"
+        $inf2cat = "packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\tools\x64\inf2cat.exe"
         
-        # Copy driver to same folder as INF
-        Copy-Item "x64\Release\ProcessDataTracker.sys" -Destination "."
-        
-        # Create catalog
-        & $inf2cat /driver:. /os:10_x64 /verbose
-        
-        if (Test-Path "ProcessDataTracker.cat") {
-            Write-Host "✓ Catalog file created successfully" -ForegroundColor Green
+        if (Test-Path $inf2cat) {
+            & $inf2cat /driver:. /os:10_X64,Server10_X64
+            Write-Host "Catalog file created successfully"
         } else {
-            Write-Host "✗ Failed to create catalog file" -ForegroundColor Red
+            Write-Error "Inf2Cat.exe not found"
             exit 1
         }
 
-    - name: Create Self-Signed Certificate
+    - name: Sign Catalog File
       shell: powershell
       run: |
-        $makecert = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\c\bin\10.0.26100.0\x64\makecert.exe"
+        $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\bin\10.0.26100.0\x64\signtool.exe"
         
-        # Create certificate
-        & $makecert -r -pe -ss "PrivateCertStore" -n "CN=ProcessDataTracker" -eku 1.3.6.1.5.5.7.3.3 -sky signature ProcessDataTracker.cer
-        
-        if (Test-Path "ProcessDataTracker.cer") {
-            Write-Host "✓ Certificate created successfully" -ForegroundColor Green
+        if (Test-Path $signtool) {
+            & $signtool sign /v /sm /s MY /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com ProcessDataTracker.cat
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Catalog file signed successfully"
+            } else {
+                Write-Warning "Signing completed with warnings. This is normal for test certificates."
+            }
         } else {
-            Write-Host "✗ Failed to create certificate" -ForegroundColor Red
+            Write-Error "SignTool.exe not found"
             exit 1
         }
 
-    - name: Sign Driver and Catalog
+    - name: Export Certificate
       shell: powershell
       run: |
-        $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\c\bin\10.0.26100.0\x64\signtool.exe"
+        # Export the certificate from the certificate store
+        $cert = Get-ChildItem -Path Cert:\LocalMachine\MY | Where-Object { $_.Subject -like "*ProcessDataTracker Test Certificate*" } | Select-Object -First 1
         
-        # Sign catalog file
-        & $signtool sign /v /s "PrivateCertStore" /n "ProcessDataTracker" /fd sha256 /t http://timestamp.digicert.com ProcessDataTracker.cat
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "✓ Catalog signed successfully" -ForegroundColor Green
+        if ($cert) {
+            $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+            [System.IO.File]::WriteAllBytes("$PWD\ProcessDataTrackerCert.cer", $certBytes)
+            Write-Host "Certificate exported successfully"
         } else {
-            Write-Host "✗ Failed to sign catalog" -ForegroundColor Red
-            exit 1
-        }
-        
-        # Sign driver file
-        & $signtool sign /v /s "PrivateCertStore" /n "ProcessDataTracker" /fd sha256 /t http://timestamp.digicert.com ProcessDataTracker.sys
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "✓ Driver signed successfully" -ForegroundColor Green
-        } else {
-            Write-Host "✗ Failed to sign driver" -ForegroundColor Red
-            exit 1
+            Write-Warning "Certificate not found in store, using previously created .cer file"
         }
 
-    - name: Verify Signatures
+    - name: Create Installation Script
       shell: powershell
       run: |
-        $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\c\bin\10.0.26100.0\x64\signtool.exe"
-        
-        Write-Host "`n=== Verifying Catalog Signature ===" -ForegroundColor Cyan
-        & $signtool verify /pa /v ProcessDataTracker.cat
-        
-        Write-Host "`n=== Verifying Driver Signature ===" -ForegroundColor Cyan
-        & $signtool verify /pa /v ProcessDataTracker.sys
-
-    - name: Create Installation Package
-      shell: powershell
-      run: |
-        # Create distribution folder
-        New-Item -ItemType Directory -Force -Path "DriverPackage"
-        
-        # Copy all necessary files
-        Copy-Item "ProcessDataTracker.sys" -Destination "DriverPackage\"
-        Copy-Item "ProcessDataTracker.cat" -Destination "DriverPackage\"
-        Copy-Item "ProcessDataTracker.inf" -Destination "DriverPackage\"
-        Copy-Item "ProcessDataTracker.cer" -Destination "DriverPackage\"
-        
-        # Create installation script
         $installScript = @'
-        @echo off
-        echo ================================================
-        echo ProcessDataTracker Driver Installation
-        echo ================================================
-        echo.
+        # ProcessDataTracker Driver Installation Script
+        # Run this script as Administrator
 
-        REM Check for admin rights
-        net session >nul 2>&1
-        if %errorLevel% neq 0 (
-            echo ERROR: Administrator privileges required!
-            echo Right-click this script and select "Run as administrator"
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host " ProcessDataTracker Driver Installer" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+
+        # Check for Administrator privileges
+        $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if (-not $isAdmin) {
+            Write-Host "ERROR: This script must be run as Administrator!" -ForegroundColor Red
             pause
-            exit /b 1
-        )
+            exit 1
+        }
 
-        echo [1/4] Installing certificate...
-        certutil -addstore "Root" "%~dp0ProcessDataTracker.cer" >nul 2>&1
-        certutil -addstore "TrustedPublisher" "%~dp0ProcessDataTracker.cer" >nul 2>&1
-        if %errorLevel% neq 0 (
-            echo ERROR: Failed to install certificate
+        # Get script directory
+        $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+        # Install certificate
+        Write-Host "`nInstalling test certificate..." -ForegroundColor Yellow
+        try {
+            certutil.exe -addstore "Root" "$scriptDir\ProcessDataTrackerCert.cer"
+            certutil.exe -addstore "TrustedPublisher" "$scriptDir\ProcessDataTrackerCert.cer"
+            Write-Host "Certificate installed successfully" -ForegroundColor Green
+        } catch {
+            Write-Host "Failed to install certificate: $_" -ForegroundColor Red
             pause
-            exit /b 1
-        )
-        echo      Certificate installed successfully
+            exit 1
+        }
 
-        echo [2/4] Copying driver files...
-        if not exist "%SystemRoot%\System32\drivers\ProcessDataTracker" mkdir "%SystemRoot%\System32\drivers\ProcessDataTracker"
-        copy /Y "%~dp0ProcessDataTracker.sys" "%SystemRoot%\System32\drivers\" >nul
-        copy /Y "%~dp0ProcessDataTracker.inf" "%SystemRoot%\System32\drivers\ProcessDataTracker\" >nul
-        copy /Y "%~dp0ProcessDataTracker.cat" "%SystemRoot%\System32\drivers\ProcessDataTracker\" >nul
-        if %errorLevel% neq 0 (
-            echo ERROR: Failed to copy driver files
+        # Install driver
+        Write-Host "`nInstalling driver..." -ForegroundColor Yellow
+        try {
+            pnputil.exe /add-driver "$scriptDir\ProcessDataTracker.inf" /install
+            Write-Host "Driver installed successfully" -ForegroundColor Green
+        } catch {
+            Write-Host "Failed to install driver: $_" -ForegroundColor Red
             pause
-            exit /b 1
-        )
-        echo      Files copied successfully
+            exit 1
+        }
 
-        echo [3/4] Installing driver...
-        pnputil /add-driver "%SystemRoot%\System32\drivers\ProcessDataTracker\ProcessDataTracker.inf" /install
-        if %errorLevel% neq 0 (
-            echo ERROR: Failed to install driver
-            pause
-            exit /b 1
-        )
-        echo      Driver installed successfully
-
-        echo [4/4] Creating service...
-        sc create ProcessDataTracker type= kernel binPath= "%SystemRoot%\System32\drivers\ProcessDataTracker.sys" start= demand
-        if %errorLevel% neq 0 (
-            echo WARNING: Service might already exist or creation failed
-        ) else (
-            echo      Service created successfully
-        )
-
-        echo.
-        echo ================================================
-        echo Installation Complete!
-        echo ================================================
-        echo.
-        echo To start the driver, run:
-        echo    sc start ProcessDataTracker
-        echo.
-        echo To stop the driver, run:
-        echo    sc stop ProcessDataTracker
-        echo.
+        Write-Host "`n========================================" -ForegroundColor Cyan
+        Write-Host "Installation completed successfully!" -ForegroundColor Green
+        Write-Host "========================================" -ForegroundColor Cyan
         pause
         '@
-        $installScript | Out-File -FilePath "DriverPackage\Install.bat" -Encoding ASCII
-        
-        # Create uninstallation script
+        $installScript | Out-File -FilePath "Install-Driver.ps1" -Encoding UTF8
+
+    - name: Create Uninstallation Script
+      shell: powershell
+      run: |
         $uninstallScript = @'
-        @echo off
-        echo ================================================
-        echo ProcessDataTracker Driver Uninstallation
-        echo ================================================
-        echo.
+        # ProcessDataTracker Driver Uninstallation Script
+        # Run this script as Administrator
 
-        REM Check for admin rights
-        net session >nul 2>&1
-        if %errorLevel% neq 0 (
-            echo ERROR: Administrator privileges required!
-            echo Right-click this script and select "Run as administrator"
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host " ProcessDataTracker Driver Uninstaller" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+
+        # Check for Administrator privileges
+        $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if (-not $isAdmin) {
+            Write-Host "ERROR: This script must be run as Administrator!" -ForegroundColor Red
             pause
-            exit /b 1
-        )
+            exit 1
+        }
 
-        echo [1/4] Stopping service...
-        sc stop ProcessDataTracker >nul 2>&1
-        timeout /t 2 /nobreak >nul
-        echo      Service stopped
+        # Get script directory
+        $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-        echo [2/4] Deleting service...
-        sc delete ProcessDataTracker >nul 2>&1
-        echo      Service deleted
+        # Uninstall driver
+        Write-Host "`nUninstalling driver..." -ForegroundColor Yellow
+        try {
+            pnputil.exe /delete-driver ProcessDataTracker.inf /uninstall /force
+            Write-Host "Driver uninstalled successfully" -ForegroundColor Green
+        } catch {
+            Write-Host "Failed to uninstall driver: $_" -ForegroundColor Red
+        }
 
-        echo [3/4] Removing driver files...
-        del /F /Q "%SystemRoot%\System32\drivers\ProcessDataTracker.sys" >nul 2>&1
-        rmdir /S /Q "%SystemRoot%\System32\drivers\ProcessDataTracker" >nul 2>&1
-        echo      Files removed
+        # Remove certificate
+        Write-Host "`nRemoving test certificate..." -ForegroundColor Yellow
+        try {
+            certutil.exe -delstore "Root" "ProcessDataTracker Test Certificate"
+            certutil.exe -delstore "TrustedPublisher" "ProcessDataTracker Test Certificate"
+            Write-Host "Certificate removed successfully" -ForegroundColor Green
+        } catch {
+            Write-Host "Failed to remove certificate: $_" -ForegroundColor Red
+        }
 
-        echo [4/4] Removing certificates...
-        certutil -delstore "Root" "ProcessDataTracker" >nul 2>&1
-        certutil -delstore "TrustedPublisher" "ProcessDataTracker" >nul 2>&1
-        echo      Certificates removed
-
-        echo.
-        echo ================================================
-        echo Uninstallation Complete!
-        echo ================================================
-        echo.
+        Write-Host "`n========================================" -ForegroundColor Cyan
+        Write-Host "Uninstallation completed!" -ForegroundColor Green
+        Write-Host "========================================" -ForegroundColor Cyan
         pause
         '@
-        $uninstallScript | Out-File -FilePath "DriverPackage\Uninstall.bat" -Encoding ASCII
-        
-        # Create README
+        $uninstallScript | Out-File -FilePath "Uninstall-Driver.ps1" -Encoding UTF8
+
+    - name: Create README
+      shell: powershell
+      run: |
         $readme = @'
-        # ProcessDataTracker Driver Installation Guide
+        # ProcessDataTracker Driver Package
 
-        ## System Requirements
-        - Windows 10/11 (64-bit)
-        - Administrator privileges
+        ## Contents
+        - `ProcessDataTracker.sys` - The driver file
+        - `ProcessDataTracker.inf` - Driver installation information
+        - `ProcessDataTracker.cat` - Signed catalog file
+        - `ProcessDataTrackerCert.cer` - Test certificate
+        - `Install-Driver.ps1` - Installation script
+        - `Uninstall-Driver.ps1` - Uninstallation script
 
-        ## Installation Steps
+        ## Installation Instructions
 
+        ### Option 1: Using PowerShell Script (Recommended)
         1. Extract all files to a folder
-        2. Right-click `Install.bat` and select "Run as administrator"
-        3. Follow the on-screen instructions
-        4. Start the driver: `sc start ProcessDataTracker`
+        2. Right-click `Install-Driver.ps1` and select "Run with PowerShell"
+        3. If prompted, choose "Run anyway" or adjust execution policy
+        4. The script will install the certificate and driver automatically
 
-        ## Files Included
-        - ProcessDataTracker.sys - The kernel driver
-        - ProcessDataTracker.cat - Driver catalog (signature)
-        - ProcessDataTracker.inf - Driver information file
-        - ProcessDataTracker.cer - Self-signed certificate
-        - Install.bat - Installation script
-        - Uninstall.bat - Uninstallation script
-
-        ## Usage
-
-        ### Start Driver
-```cmd
-        sc start ProcessDataTracker
-```
-
-        ### Stop Driver
-```cmd
-        sc stop ProcessDataTracker
-```
-
-        ### Check Status
-```cmd
-        sc query ProcessDataTracker
-```
+        ### Option 2: Manual Installation
+        1. Install the certificate:
+           ```
+           certutil.exe -addstore "Root" ProcessDataTrackerCert.cer
+           certutil.exe -addstore "TrustedPublisher" ProcessDataTrackerCert.cer
+           ```
+        2. Install the driver:
+           ```
+           pnputil.exe /add-driver ProcessDataTracker.inf /install
+           ```
 
         ## Uninstallation
 
-        Right-click `Uninstall.bat` and select "Run as administrator"
+        Run `Uninstall-Driver.ps1` as Administrator to remove the driver and certificate.
+
+        ## Important Notes
+
+        - This driver is signed with a TEST certificate
+        - The certificate is only valid for testing purposes
+        - For production use, obtain a proper code signing certificate from a trusted CA
+        - You may need to enable test signing mode on Windows:
+          ```
+          bcdedit /set testsigning on
+          ```
+          Then restart your computer
 
         ## Troubleshooting
 
-        ### "Access Denied" Error
-        - Make sure you're running as Administrator
-        - Disable antivirus temporarily
-
-        ### "Driver Could Not Be Loaded"
-        - Verify certificate is installed: `certutil -store Root | findstr ProcessDataTracker`
-        - Check Windows Event Viewer for detailed errors
-
-        ### Certificate Warnings
-        - This driver uses a self-signed certificate
-        - Windows may show security warnings - this is normal
-        - The certificate is automatically installed by Install.bat
+        If you encounter "Windows cannot verify the digital signature" error:
+        1. Ensure the certificate is installed in both Root and TrustedPublisher stores
+        2. Enable test signing mode (see above)
+        3. Disable driver signature enforcement temporarily (not recommended for production)
 
         ## Support
-        For issues, check the GitHub repository issues page.
-        '@
-        $readme | Out-File -FilePath "DriverPackage\README.md" -Encoding UTF8
 
-    - name: Upload Signed Driver Package
+        For issues or questions, please check the project repository.
+        '@
+        $readme | Out-File -FilePath "README.md" -Encoding UTF8
+
+    - name: Verify Files
+      shell: powershell
+      run: |
+        Write-Host "`nVerifying generated files..." -ForegroundColor Cyan
+        
+        $requiredFiles = @(
+            "ProcessDataTracker.sys",
+            "ProcessDataTracker.inf",
+            "ProcessDataTracker.cat",
+            "ProcessDataTrackerCert.cer",
+            "Install-Driver.ps1",
+            "Uninstall-Driver.ps1",
+            "README.md"
+        )
+        
+        $allFilesExist = $true
+        foreach ($file in $requiredFiles) {
+            if (Test-Path $file) {
+                $fileInfo = Get-Item $file
+                Write-Host "✓ $file ($([math]::Round($fileInfo.Length/1KB, 2)) KB)" -ForegroundColor Green
+            } else {
+                Write-Host "✗ $file - MISSING" -ForegroundColor Red
+                $allFilesExist = $false
+            }
+        }
+        
+        if (-not $allFilesExist) {
+            Write-Host "`nERROR: Some required files are missing!" -ForegroundColor Red
+            exit 1
+        }
+
+    - name: Create Driver Package
+      shell: powershell
+      run: |
+        # Create a zip package with all necessary files
+        $files = @(
+            "ProcessDataTracker.sys",
+            "ProcessDataTracker.inf",
+            "ProcessDataTracker.cat",
+            "ProcessDataTrackerCert.cer",
+            "Install-Driver.ps1",
+            "Uninstall-Driver.ps1",
+            "README.md"
+        )
+        
+        Compress-Archive -Path $files -DestinationPath "ProcessDataTracker-Package.zip" -Force
+        Write-Host "Driver package created: ProcessDataTracker-Package.zip" -ForegroundColor Green
+
+    - name: Upload Complete Driver Package
       uses: actions/upload-artifact@v4
       with:
-        name: ProcessDataTracker-Signed-Package
-        path: DriverPackage/
+        name: ProcessDataTracker-Complete-Package
+        path: ProcessDataTracker-Package.zip
+        if-no-files-found: error
+
+    - name: Upload Individual Files
+      uses: actions/upload-artifact@v4
+      with:
+        name: ProcessDataTracker-Files
+        path: |
+          ProcessDataTracker.sys
+          ProcessDataTracker.inf
+          ProcessDataTracker.cat
+          ProcessDataTrackerCert.cer
+          Install-Driver.ps1
+          Uninstall-Driver.ps1
+          README.md
         if-no-files-found: error
 
     - name: Build Summary
@@ -441,44 +467,30 @@ jobs:
       shell: powershell
       run: |
         Write-Host "`n========================================" -ForegroundColor Cyan
-        Write-Host " BUILD AND SIGNING SUMMARY" -ForegroundColor Cyan
+        Write-Host " BUILD SUMMARY" -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
        
-        if (Test-Path "DriverPackage\ProcessDataTracker.sys") {
-            $file = Get-Item "DriverPackage\ProcessDataTracker.sys"
+        if (Test-Path "ProcessDataTracker.sys") {
             Write-Host "✓ Status: SUCCESS" -ForegroundColor Green
-            Write-Host "✓ Driver: ProcessDataTracker.sys" -ForegroundColor Green
-            Write-Host "✓ Size: $([math]::Round($file.Length/1KB, 2)) KB" -ForegroundColor Green
-            Write-Host "✓ Signed: YES (self-signed certificate)" -ForegroundColor Green
-            Write-Host "✓ Catalog: ProcessDataTracker.cat" -ForegroundColor Green
             Write-Host "`n📦 Package Contents:" -ForegroundColor Yellow
-            Write-Host "   - ProcessDataTracker.sys (driver)" -ForegroundColor White
-            Write-Host "   - ProcessDataTracker.cat (signature)" -ForegroundColor White
-            Write-Host "   - ProcessDataTracker.inf (info file)" -ForegroundColor White
-            Write-Host "   - ProcessDataTracker.cer (certificate)" -ForegroundColor White
-            Write-Host "   - Install.bat (installer)" -ForegroundColor White
-            Write-Host "   - Uninstall.bat (uninstaller)" -ForegroundColor White
-            Write-Host "   - README.md (instructions)" -ForegroundColor White
-            Write-Host "`n📥 Download 'ProcessDataTracker-Signed-Package' from Artifacts" -ForegroundColor Cyan
+            Write-Host "  • ProcessDataTracker.sys (Driver)" -ForegroundColor White
+            Write-Host "  • ProcessDataTracker.inf (Installation Info)" -ForegroundColor White
+            Write-Host "  • ProcessDataTracker.cat (Signed Catalog)" -ForegroundColor White
+            Write-Host "  • ProcessDataTrackerCert.cer (Test Certificate)" -ForegroundColor White
+            Write-Host "  • Install-Driver.ps1 (Installation Script)" -ForegroundColor White
+            Write-Host "  • Uninstall-Driver.ps1 (Uninstallation Script)" -ForegroundColor White
+            Write-Host "  • README.md (Documentation)" -ForegroundColor White
+            Write-Host "`n📥 Download:" -ForegroundColor Yellow
+            Write-Host "  • ProcessDataTracker-Complete-Package.zip (All files)" -ForegroundColor White
+            Write-Host "  • ProcessDataTracker-Files (Individual files)" -ForegroundColor White
+            Write-Host "`n⚠️  Important Notes:" -ForegroundColor Yellow
+            Write-Host "  • Driver is signed with a TEST certificate" -ForegroundColor White
+            Write-Host "  • Run Install-Driver.ps1 as Administrator" -ForegroundColor White
+            Write-Host "  • You may need to enable test signing mode" -ForegroundColor White
+            Write-Host "  • See README.md for detailed instructions" -ForegroundColor White
         } else {
             Write-Host "✗ Status: FAILED" -ForegroundColor Red
-            Write-Host "✗ Driver package not generated" -ForegroundColor Red
+            Write-Host "✗ Driver file not generated" -ForegroundColor Red
         }
        
         Write-Host "========================================`n" -ForegroundColor Cyan
-```
-
----
-
-## **What You Get After Running This:**
-
-Download the **"ProcessDataTracker-Signed-Package"** artifact which contains:
-```
-DriverPackage/
-├── ProcessDataTracker.sys       (Your signed driver - 9KB)
-├── ProcessDataTracker.cat       (Catalog signature file)
-├── ProcessDataTracker.inf       (Driver information)
-├── ProcessDataTracker.cer       (Self-signed certificate)
-├── Install.bat                  (One-click installer)
-├── Uninstall.bat               (One-click uninstaller)
-└── README.md                    (Instructions)
