@@ -68,6 +68,7 @@ jobs:
             <ConfigurationType>Driver</ConfigurationType>
             <DriverType>WDM</DriverType>
             <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+            <DriverSign>false</DriverSign>
           </PropertyGroup>
           <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
           <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -112,7 +113,7 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     - name: Build Driver
-      run: msbuild ProcessDataTracker.vcxproj /p:Configuration=Release /p:Platform=x64
+      run: msbuild ProcessDataTracker.vcxproj /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off
 
     - name: Upload Driver Artifact
       uses: actions/upload-artifact@v4
@@ -135,6 +136,7 @@ jobs:
             Write-Host "✓ Driver: ProcessDataTracker.sys" -ForegroundColor Green
             Write-Host "✓ Size: $([math]::Round($file.Length/1KB, 2)) KB" -ForegroundColor Green
             Write-Host "`n📦 Download from 'Artifacts' section below" -ForegroundColor Yellow
+            Write-Host "⚠️  Note: Driver is unsigned - you'll need to sign it for testing" -ForegroundColor Yellow
         } else {
             Write-Host "✗ Status: FAILED" -ForegroundColor Red
             Write-Host "✗ Driver file not generated" -ForegroundColor Red
