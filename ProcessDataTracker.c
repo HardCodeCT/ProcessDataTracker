@@ -314,7 +314,8 @@ VOID NTAPI ClassifyFnAleV4(
     UNREFERENCED_PARAMETER(filter);
     UNREFERENCED_PARAMETER(flowContext);
     
-    if (FWPS_IS_METADATA_FIELD_PRESENT(inMetaValues, FWPS_METADATA_FIELD_PROCESS_ID)) {
+    // Only set flow context if not already set
+    if (flowContext == 0 && FWPS_IS_METADATA_FIELD_PRESENT(inMetaValues, FWPS_METADATA_FIELD_PROCESS_ID)) {
         context = (PFLOW_CONTEXT)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(FLOW_CONTEXT), 'FCTX');
         if (context) {
             context->ProcessId = (UINT32)inMetaValues->processId;
@@ -322,8 +323,14 @@ VOID NTAPI ClassifyFnAleV4(
             // Get the flow ID
             flowId = inMetaValues->flowHandle;
             
-            // Associate context with flow
-            status = FwpsFlowAssociateContext0(flowId, FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4, g_CalloutIdAleV4, (UINT64)context);
+            // Associate context with flow using FwpsFlowAssociateContext0
+            status = FwpsFlowAssociateContext0(
+                flowId,
+                FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4,
+                g_CalloutIdAleV4,
+                (UINT64)context
+            );
+            
             if (!NT_SUCCESS(status)) {
                 DbgPrint("ProcessDataTracker: Failed to associate flow context: 0x%X\n", status);
                 ExFreePoolWithTag(context, 'FCTX');
@@ -347,41 +354,34 @@ VOID NTAPI ClassifyFnOutboundV4(
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 )
 {
-    NTSTATUS status;
     PFLOW_CONTEXT context;
     PNET_BUFFER_LIST netBufferList;
     PNET_BUFFER netBuffer;
     UINT32 pid;
     UINT64 bytes;
-    UINT64 flowId;
     
     UNREFERENCED_PARAMETER(inFixedValues);
+    UNREFERENCED_PARAMETER(inMetaValues);
     UNREFERENCED_PARAMETER(classifyContext);
     UNREFERENCED_PARAMETER(filter);
-    UNREFERENCED_PARAMETER(flowContext);
     
-    context = NULL;
+    // Use the flowContext parameter directly - it contains our context pointer
+    context = (PFLOW_CONTEXT)flowContext;
     
-    // Get flow context
-    if (FWPS_IS_METADATA_FIELD_PRESENT(inMetaValues, FWPS_METADATA_FIELD_FLOW_HANDLE)) {
-        flowId = inMetaValues->flowHandle;
-        status = FwpsFlowGetContext0(flowId, FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4, g_CalloutIdAleV4, (UINT64*)&context);
+    if (context && layerData) {
+        pid = context->ProcessId;
+        bytes = 0;
         
-        if (NT_SUCCESS(status) && context && layerData) {
-            pid = context->ProcessId;
-            bytes = 0;
-            
-            netBufferList = (PNET_BUFFER_LIST)layerData;
-            netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
-            
-            while (netBuffer) {
-                bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
-                netBuffer = NET_BUFFER_NEXT_NB(netBuffer);
-            }
-            
-            if (bytes > 0) {
-                UpdateProcessStats(pid, bytes, TRUE); // Outbound
-            }
+        netBufferList = (PNET_BUFFER_LIST)layerData;
+        netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
+        
+        while (netBuffer) {
+            bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
+            netBuffer = NET_BUFFER_NEXT_NB(netBuffer);
+        }
+        
+        if (bytes > 0) {
+            UpdateProcessStats(pid, bytes, TRUE); // Outbound
         }
     }
     
@@ -399,41 +399,34 @@ VOID NTAPI ClassifyFnInboundV4(
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 )
 {
-    NTSTATUS status;
     PFLOW_CONTEXT context;
     PNET_BUFFER_LIST netBufferList;
     PNET_BUFFER netBuffer;
     UINT32 pid;
     UINT64 bytes;
-    UINT64 flowId;
     
     UNREFERENCED_PARAMETER(inFixedValues);
+    UNREFERENCED_PARAMETER(inMetaValues);
     UNREFERENCED_PARAMETER(classifyContext);
     UNREFERENCED_PARAMETER(filter);
-    UNREFERENCED_PARAMETER(flowContext);
     
-    context = NULL;
+    // Use the flowContext parameter directly - it contains our context pointer
+    context = (PFLOW_CONTEXT)flowContext;
     
-    // Get flow context
-    if (FWPS_IS_METADATA_FIELD_PRESENT(inMetaValues, FWPS_METADATA_FIELD_FLOW_HANDLE)) {
-        flowId = inMetaValues->flowHandle;
-        status = FwpsFlowGetContext0(flowId, FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4, g_CalloutIdAleV4, (UINT64*)&context);
+    if (context && layerData) {
+        pid = context->ProcessId;
+        bytes = 0;
         
-        if (NT_SUCCESS(status) && context && layerData) {
-            pid = context->ProcessId;
-            bytes = 0;
-            
-            netBufferList = (PNET_BUFFER_LIST)layerData;
-            netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
-            
-            while (netBuffer) {
-                bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
-                netBuffer = NET_BUFFER_NEXT_NB(netBuffer);
-            }
-            
-            if (bytes > 0) {
-                UpdateProcessStats(pid, bytes, FALSE); // Inbound
-            }
+        netBufferList = (PNET_BUFFER_LIST)layerData;
+        netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
+        
+        while (netBuffer) {
+            bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
+            netBuffer = NET_BUFFER_NEXT_NB(netBuffer);
+        }
+        
+        if (bytes > 0) {
+            UpdateProcessStats(pid, bytes, FALSE); // Inbound
         }
     }
     
