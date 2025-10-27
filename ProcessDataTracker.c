@@ -10,6 +10,7 @@
 
 #pragma warning(push)
 #pragma warning(disable:4201) // nameless struct/union
+#pragma warning(disable:4996) // deprecated function warnings
 
 // Device name for IOCTL communication
 #define DEVICE_NAME L"\\Device\\ProcessDataTracker"
@@ -78,13 +79,13 @@ DRIVER_DISPATCH DeviceControl;
 NTSTATUS RegisterCallouts(PDEVICE_OBJECT deviceObject);
 VOID UnregisterCallouts(VOID);
 
-// Callout functions
+// Callout functions - using correct signatures for FWPS_CALLOUT_CLASSIFY_FN2
 VOID NTAPI ClassifyFnAleV4(
     _In_ const FWPS_INCOMING_VALUES0* inFixedValues,
     _In_ const FWPS_INCOMING_METADATA_VALUES0* inMetaValues,
     _Inout_opt_ VOID* layerData,
     _In_opt_ const VOID* classifyContext,
-    _In_ const FWPS_FILTER3* filter,
+    _In_ const FWPS_FILTER2* filter,
     _In_ UINT64 flowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 );
@@ -94,7 +95,7 @@ VOID NTAPI ClassifyFnOutboundV4(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* inMetaValues,
     _Inout_opt_ VOID* layerData,
     _In_opt_ const VOID* classifyContext,
-    _In_ const FWPS_FILTER3* filter,
+    _In_ const FWPS_FILTER2* filter,
     _In_ UINT64 flowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 );
@@ -104,7 +105,7 @@ VOID NTAPI ClassifyFnInboundV4(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* inMetaValues,
     _Inout_opt_ VOID* layerData,
     _In_opt_ const VOID* classifyContext,
-    _In_ const FWPS_FILTER3* filter,
+    _In_ const FWPS_FILTER2* filter,
     _In_ UINT64 flowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 );
@@ -112,7 +113,7 @@ VOID NTAPI ClassifyFnInboundV4(
 NTSTATUS NTAPI NotifyFn(
     _In_ FWPS_CALLOUT_NOTIFY_TYPE notifyType,
     _In_ const GUID* filterKey,
-    _Inout_ FWPS_FILTER3* filter
+    _Inout_ FWPS_FILTER2* filter
 );
 
 VOID NTAPI FlowDeleteFnAleV4(
@@ -233,15 +234,15 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT driverObject)
 NTSTATUS RegisterCallouts(PDEVICE_OBJECT deviceObject)
 {
     NTSTATUS status;
-    FWPS_CALLOUT0 callout = { 0 };
+    FWPS_CALLOUT2 callout = { 0 };
     
     // Register ALE V4 callout
     callout.calloutKey = PROCESS_TRACKER_CALLOUT_ALE_V4_GUID;
-    callout.classifyFn = ClassifyFnAleV4;
-    callout.notifyFn = NotifyFn;
+    callout.classifyFn = (FWPS_CALLOUT_CLASSIFY_FN2)ClassifyFnAleV4;
+    callout.notifyFn = (FWPS_CALLOUT_NOTIFY_FN2)NotifyFn;
     callout.flowDeleteFn = FlowDeleteFnAleV4;
     
-    status = FwpsCalloutRegister0(deviceObject, &callout, &g_CalloutIdAleV4);
+    status = FwpsCalloutRegister2(deviceObject, &callout, &g_CalloutIdAleV4);
     if (!NT_SUCCESS(status)) {
         DbgPrint("ProcessDataTracker: Failed to register ALE V4 callout: 0x%X\n", status);
         return status;
@@ -249,11 +250,11 @@ NTSTATUS RegisterCallouts(PDEVICE_OBJECT deviceObject)
     
     // Register outbound V4 callout
     callout.calloutKey = PROCESS_TRACKER_CALLOUT_OUTBOUND_V4_GUID;
-    callout.classifyFn = ClassifyFnOutboundV4;
-    callout.notifyFn = NotifyFn;
+    callout.classifyFn = (FWPS_CALLOUT_CLASSIFY_FN2)ClassifyFnOutboundV4;
+    callout.notifyFn = (FWPS_CALLOUT_NOTIFY_FN2)NotifyFn;
     callout.flowDeleteFn = NULL;
     
-    status = FwpsCalloutRegister0(deviceObject, &callout, &g_CalloutIdOutboundV4);
+    status = FwpsCalloutRegister2(deviceObject, &callout, &g_CalloutIdOutboundV4);
     if (!NT_SUCCESS(status)) {
         DbgPrint("ProcessDataTracker: Failed to register outbound V4 callout: 0x%X\n", status);
         FwpsCalloutUnregisterById0(g_CalloutIdAleV4);
@@ -262,11 +263,11 @@ NTSTATUS RegisterCallouts(PDEVICE_OBJECT deviceObject)
     
     // Register inbound V4 callout
     callout.calloutKey = PROCESS_TRACKER_CALLOUT_INBOUND_V4_GUID;
-    callout.classifyFn = ClassifyFnInboundV4;
-    callout.notifyFn = NotifyFn;
+    callout.classifyFn = (FWPS_CALLOUT_CLASSIFY_FN2)ClassifyFnInboundV4;
+    callout.notifyFn = (FWPS_CALLOUT_NOTIFY_FN2)NotifyFn;
     callout.flowDeleteFn = NULL;
     
-    status = FwpsCalloutRegister0(deviceObject, &callout, &g_CalloutIdInboundV4);
+    status = FwpsCalloutRegister2(deviceObject, &callout, &g_CalloutIdInboundV4);
     if (!NT_SUCCESS(status)) {
         DbgPrint("ProcessDataTracker: Failed to register inbound V4 callout: 0x%X\n", status);
         FwpsCalloutUnregisterById0(g_CalloutIdAleV4);
@@ -298,11 +299,15 @@ VOID NTAPI ClassifyFnAleV4(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* inMetaValues,
     _Inout_opt_ VOID* layerData,
     _In_opt_ const VOID* classifyContext,
-    _In_ const FWPS_FILTER3* filter,
+    _In_ const FWPS_FILTER2* filter,
     _In_ UINT64 flowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 )
 {
+    NTSTATUS status;
+    PFLOW_CONTEXT context;
+    UINT64 flowId;
+    
     UNREFERENCED_PARAMETER(inFixedValues);
     UNREFERENCED_PARAMETER(layerData);
     UNREFERENCED_PARAMETER(classifyContext);
@@ -310,14 +315,21 @@ VOID NTAPI ClassifyFnAleV4(
     UNREFERENCED_PARAMETER(flowContext);
     
     if (FWPS_IS_METADATA_FIELD_PRESENT(inMetaValues, FWPS_METADATA_FIELD_PROCESS_ID)) {
-        PFLOW_CONTEXT context = (PFLOW_CONTEXT)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(FLOW_CONTEXT), 'FCTX');
+        context = (PFLOW_CONTEXT)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(FLOW_CONTEXT), 'FCTX');
         if (context) {
             context->ProcessId = (UINT32)inMetaValues->processId;
-            classifyOut->actionType = FWP_ACTION_PERMIT;
-            classifyOut->flags |= FWPS_CLASSIFY_OUT_FLAG_ABSORB;
-            classifyOut->flowContext = (UINT64)context;
-            DbgPrint("ProcessDataTracker: Set flow context for PID %u\n", context->ProcessId);
-            return;
+            
+            // Get the flow ID
+            flowId = inMetaValues->flowHandle;
+            
+            // Associate context with flow
+            status = FwpsFlowAssociateContext0(flowId, FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4, g_CalloutIdAleV4, (UINT64)context);
+            if (!NT_SUCCESS(status)) {
+                DbgPrint("ProcessDataTracker: Failed to associate flow context: 0x%X\n", status);
+                ExFreePoolWithTag(context, 'FCTX');
+            } else {
+                DbgPrint("ProcessDataTracker: Set flow context for PID %u\n", context->ProcessId);
+            }
         }
     }
     
@@ -330,37 +342,46 @@ VOID NTAPI ClassifyFnOutboundV4(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* inMetaValues,
     _Inout_opt_ VOID* layerData,
     _In_opt_ const VOID* classifyContext,
-    _In_ const FWPS_FILTER3* filter,
+    _In_ const FWPS_FILTER2* filter,
     _In_ UINT64 flowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 )
 {
+    NTSTATUS status;
     PFLOW_CONTEXT context;
     PNET_BUFFER_LIST netBufferList;
     PNET_BUFFER netBuffer;
     UINT32 pid;
     UINT64 bytes;
+    UINT64 flowId;
     
     UNREFERENCED_PARAMETER(inFixedValues);
-    UNREFERENCED_PARAMETER(inMetaValues);
     UNREFERENCED_PARAMETER(classifyContext);
     UNREFERENCED_PARAMETER(filter);
+    UNREFERENCED_PARAMETER(flowContext);
     
-    context = (PFLOW_CONTEXT)flowContext;
-    if (context && layerData) {
-        pid = context->ProcessId;
-        bytes = 0;
+    context = NULL;
+    
+    // Get flow context
+    if (FWPS_IS_METADATA_FIELD_PRESENT(inMetaValues, FWPS_METADATA_FIELD_FLOW_HANDLE)) {
+        flowId = inMetaValues->flowHandle;
+        status = FwpsFlowGetContext0(flowId, FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4, g_CalloutIdAleV4, (UINT64*)&context);
         
-        netBufferList = (PNET_BUFFER_LIST)layerData;
-        netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
-        
-        while (netBuffer) {
-            bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
-            netBuffer = NET_BUFFER_NEXT_NB(netBuffer);
-        }
-        
-        if (bytes > 0) {
-            UpdateProcessStats(pid, bytes, TRUE); // Outbound
+        if (NT_SUCCESS(status) && context && layerData) {
+            pid = context->ProcessId;
+            bytes = 0;
+            
+            netBufferList = (PNET_BUFFER_LIST)layerData;
+            netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
+            
+            while (netBuffer) {
+                bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
+                netBuffer = NET_BUFFER_NEXT_NB(netBuffer);
+            }
+            
+            if (bytes > 0) {
+                UpdateProcessStats(pid, bytes, TRUE); // Outbound
+            }
         }
     }
     
@@ -373,37 +394,46 @@ VOID NTAPI ClassifyFnInboundV4(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* inMetaValues,
     _Inout_opt_ VOID* layerData,
     _In_opt_ const VOID* classifyContext,
-    _In_ const FWPS_FILTER3* filter,
+    _In_ const FWPS_FILTER2* filter,
     _In_ UINT64 flowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 )
 {
+    NTSTATUS status;
     PFLOW_CONTEXT context;
     PNET_BUFFER_LIST netBufferList;
     PNET_BUFFER netBuffer;
     UINT32 pid;
     UINT64 bytes;
+    UINT64 flowId;
     
     UNREFERENCED_PARAMETER(inFixedValues);
-    UNREFERENCED_PARAMETER(inMetaValues);
     UNREFERENCED_PARAMETER(classifyContext);
     UNREFERENCED_PARAMETER(filter);
+    UNREFERENCED_PARAMETER(flowContext);
     
-    context = (PFLOW_CONTEXT)flowContext;
-    if (context && layerData) {
-        pid = context->ProcessId;
-        bytes = 0;
+    context = NULL;
+    
+    // Get flow context
+    if (FWPS_IS_METADATA_FIELD_PRESENT(inMetaValues, FWPS_METADATA_FIELD_FLOW_HANDLE)) {
+        flowId = inMetaValues->flowHandle;
+        status = FwpsFlowGetContext0(flowId, FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4, g_CalloutIdAleV4, (UINT64*)&context);
         
-        netBufferList = (PNET_BUFFER_LIST)layerData;
-        netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
-        
-        while (netBuffer) {
-            bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
-            netBuffer = NET_BUFFER_NEXT_NB(netBuffer);
-        }
-        
-        if (bytes > 0) {
-            UpdateProcessStats(pid, bytes, FALSE); // Inbound
+        if (NT_SUCCESS(status) && context && layerData) {
+            pid = context->ProcessId;
+            bytes = 0;
+            
+            netBufferList = (PNET_BUFFER_LIST)layerData;
+            netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
+            
+            while (netBuffer) {
+                bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
+                netBuffer = NET_BUFFER_NEXT_NB(netBuffer);
+            }
+            
+            if (bytes > 0) {
+                UpdateProcessStats(pid, bytes, FALSE); // Inbound
+            }
         }
     }
     
@@ -414,7 +444,7 @@ VOID NTAPI ClassifyFnInboundV4(
 NTSTATUS NTAPI NotifyFn(
     _In_ FWPS_CALLOUT_NOTIFY_TYPE notifyType,
     _In_ const GUID* filterKey,
-    _Inout_ FWPS_FILTER3* filter
+    _Inout_ FWPS_FILTER2* filter
 )
 {
     UNREFERENCED_PARAMETER(notifyType);
@@ -438,6 +468,7 @@ VOID NTAPI FlowDeleteFnAleV4(
     
     context = (PFLOW_CONTEXT)flowContext;
     if (context) {
+        FwpsFlowRemoveContext0(flowContext, FWPS_LAYER_ALE_FLOW_ESTABLISHED_V4, calloutId);
         ExFreePoolWithTag(context, 'FCTX');
     }
 }
@@ -466,7 +497,7 @@ PSTATS_ENTRY FindOrCreateStatsEntry(UINT32 processId)
     }
     
     // Create new entry
-    statsEntry = (PSTATS_ENTRY)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(STATS_ENTRY), 'STAT');
+    statsEntry = (PSTATS_ENTRY)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(STATS_ENTRY), 'STAT');
     if (statsEntry == NULL) {
         return NULL;
     }
