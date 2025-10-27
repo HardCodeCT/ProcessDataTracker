@@ -12,6 +12,13 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
+    - name: Add missing include to C file
+      shell: powershell
+      run: |
+        $file = "ProcessDataTracker.c"
+        $content = Get-Content $file -Raw
+        $newContent = $content -replace "#include <ntddk.h>", "#include <ntddk.h>`r`n#include <ndis.h>"
+        Set-Content $file $newContent -Encoding ASCII
     - name: Setup NuGet
       uses: NuGet/setup-nuget@v2
     - name: Create packages.config
