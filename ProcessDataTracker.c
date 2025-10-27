@@ -1,5 +1,8 @@
+// Define NDIS version before including any headers
+#define NDIS630 1
+#define NDIS_SUPPORT_NDIS630 1
+
 #include <ntddk.h>
-#include <wdf.h>
 #include <ndis.h>
 #include <fwpsk.h>
 #include <fwpmk.h>
@@ -73,7 +76,7 @@ _Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
 DRIVER_DISPATCH DeviceControl;
 
 NTSTATUS RegisterCallouts(PDEVICE_OBJECT deviceObject);
-VOID UnregisterCallouts();
+VOID UnregisterCallouts(VOID);
 
 // Callout functions
 VOID NTAPI ClassifyFnAleV4(
@@ -132,6 +135,7 @@ NTSTATUS DriverEntry(
     NTSTATUS status;
     UNICODE_STRING deviceName;
     UNICODE_STRING symlinkName;
+    ULONG i;
     
     UNREFERENCED_PARAMETER(registryPath);
     
@@ -139,7 +143,7 @@ NTSTATUS DriverEntry(
     
     // Initialize hash table and lock
     KeInitializeSpinLock(&g_StatsLock);
-    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+    for (i = 0; i < HASH_TABLE_SIZE; i++) {
         InitializeListHead(&g_StatsHashTable[i]);
     }
     
@@ -195,6 +199,7 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT driverObject)
     KIRQL oldIrql;
     PLIST_ENTRY entry;
     PSTATS_ENTRY statsEntry;
+    ULONG i;
     
     UNREFERENCED_PARAMETER(driverObject);
     
@@ -205,7 +210,7 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT driverObject)
     
     // Clean up stats hash table
     KeAcquireSpinLock(&g_StatsLock, &oldIrql);
-    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+    for (i = 0; i < HASH_TABLE_SIZE; i++) {
         while (!IsListEmpty(&g_StatsHashTable[i])) {
             entry = RemoveHeadList(&g_StatsHashTable[i]);
             statsEntry = CONTAINING_RECORD(entry, STATS_ENTRY, ListEntry);
@@ -250,7 +255,8 @@ NTSTATUS RegisterCallouts(PDEVICE_OBJECT deviceObject)
     
     status = FwpsCalloutRegister0(deviceObject, &callout, &g_CalloutIdOutboundV4);
     if (!NT_SUCCESS(status)) {
-        DbgPrint("ProcessDataTraacker: Failed to register outbound V4 callout: 0x%X\n", status);
+        DbgPrint("ProcessDataTracker: Failed to register outbound V4 callout: 0x%X\n", status);
+        FwpsCalloutUnregisterById0(g_CalloutIdAleV4);
         return status;
     }
     
@@ -263,6 +269,8 @@ NTSTATUS RegisterCallouts(PDEVICE_OBJECT deviceObject)
     status = FwpsCalloutRegister0(deviceObject, &callout, &g_CalloutIdInboundV4);
     if (!NT_SUCCESS(status)) {
         DbgPrint("ProcessDataTracker: Failed to register inbound V4 callout: 0x%X\n", status);
+        FwpsCalloutUnregisterById0(g_CalloutIdAleV4);
+        FwpsCalloutUnregisterById0(g_CalloutIdOutboundV4);
         return status;
     }
     
@@ -271,7 +279,7 @@ NTSTATUS RegisterCallouts(PDEVICE_OBJECT deviceObject)
 }
 
 // Unregister callouts
-VOID UnregisterCallouts()
+VOID UnregisterCallouts(VOID)
 {
     if (g_CalloutIdAleV4 != 0) {
         FwpsCalloutUnregisterById0(g_CalloutIdAleV4);
@@ -306,7 +314,7 @@ VOID NTAPI ClassifyFnAleV4(
         if (context) {
             context->ProcessId = (UINT32)inMetaValues->processId;
             classifyOut->actionType = FWP_ACTION_PERMIT;
-            classifyOut->flags |= FWPS_CLASSIFY_OUT_FLAG_SET_FLOW_CONTEXT;
+            classifyOut->flags |= FWPS_CLASSIFY_OUT_FLAG_ABSORB;
             classifyOut->flowContext = (UINT64)context;
             DbgPrint("ProcessDataTracker: Set flow context for PID %u\n", context->ProcessId);
             return;
@@ -327,18 +335,24 @@ VOID NTAPI ClassifyFnOutboundV4(
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 )
 {
+    PFLOW_CONTEXT context;
+    PNET_BUFFER_LIST netBufferList;
+    PNET_BUFFER netBuffer;
+    UINT32 pid;
+    UINT64 bytes;
+    
     UNREFERENCED_PARAMETER(inFixedValues);
     UNREFERENCED_PARAMETER(inMetaValues);
     UNREFERENCED_PARAMETER(classifyContext);
     UNREFERENCED_PARAMETER(filter);
     
-    PFLOW_CONTEXT context = (PFLOW_CONTEXT)flowContext;
+    context = (PFLOW_CONTEXT)flowContext;
     if (context && layerData) {
-        UINT32 pid = context->ProcessId;
-        UINT64 bytes = 0;
+        pid = context->ProcessId;
+        bytes = 0;
         
-        NET_BUFFER_LIST* netBufferList = (NET_BUFFER_LIST*)layerData;
-        NET_BUFFER* netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
+        netBufferList = (PNET_BUFFER_LIST)layerData;
+        netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
         
         while (netBuffer) {
             bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
@@ -364,18 +378,24 @@ VOID NTAPI ClassifyFnInboundV4(
     _Inout_ FWPS_CLASSIFY_OUT0* classifyOut
 )
 {
+    PFLOW_CONTEXT context;
+    PNET_BUFFER_LIST netBufferList;
+    PNET_BUFFER netBuffer;
+    UINT32 pid;
+    UINT64 bytes;
+    
     UNREFERENCED_PARAMETER(inFixedValues);
     UNREFERENCED_PARAMETER(inMetaValues);
     UNREFERENCED_PARAMETER(classifyContext);
     UNREFERENCED_PARAMETER(filter);
     
-    PFLOW_CONTEXT context = (PFLOW_CONTEXT)flowContext;
+    context = (PFLOW_CONTEXT)flowContext;
     if (context && layerData) {
-        UINT32 pid = context->ProcessId;
-        UINT64 bytes = 0;
+        pid = context->ProcessId;
+        bytes = 0;
         
-        NET_BUFFER_LIST* netBufferList = (NET_BUFFER_LIST*)layerData;
-        NET_BUFFER* netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
+        netBufferList = (PNET_BUFFER_LIST)layerData;
+        netBuffer = NET_BUFFER_LIST_FIRST_NB(netBufferList);
         
         while (netBuffer) {
             bytes += NET_BUFFER_DATA_LENGTH(netBuffer);
@@ -411,10 +431,12 @@ VOID NTAPI FlowDeleteFnAleV4(
     _In_ UINT64 flowContext
 )
 {
+    PFLOW_CONTEXT context;
+    
     UNREFERENCED_PARAMETER(layerId);
     UNREFERENCED_PARAMETER(calloutId);
     
-    PFLOW_CONTEXT context = (PFLOW_CONTEXT)flowContext;
+    context = (PFLOW_CONTEXT)flowContext;
     if (context) {
         ExFreePoolWithTag(context, 'FCTX');
     }
@@ -505,6 +527,7 @@ NTSTATUS DeviceControl(
     NTSTATUS status = STATUS_SUCCESS;
     ULONG bytesReturned = 0;
     KIRQL oldIrql;
+    ULONG i;
     
     UNREFERENCED_PARAMETER(deviceObject);
     
@@ -519,7 +542,7 @@ NTSTATUS DeviceControl(
             
             KeAcquireSpinLock(&g_StatsLock, &oldIrql);
             
-            for (int i = 0; i < HASH_TABLE_SIZE && entryCount < maxEntries; i++) {
+            for (i = 0; i < HASH_TABLE_SIZE && entryCount < maxEntries; i++) {
                 PLIST_ENTRY entry;
                 for (entry = g_StatsHashTable[i].Flink;
                      entry != &g_StatsHashTable[i] && entryCount < maxEntries;
@@ -547,7 +570,7 @@ NTSTATUS DeviceControl(
             
             KeAcquireSpinLock(&g_StatsLock, &oldIrql);
             
-            for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+            for (i = 0; i < HASH_TABLE_SIZE; i++) {
                 while (!IsListEmpty(&g_StatsHashTable[i])) {
                     entry = RemoveHeadList(&g_StatsHashTable[i]);
                     statsEntry = CONTAINING_RECORD(entry, STATS_ENTRY, ListEntry);
@@ -572,6 +595,5 @@ NTSTATUS DeviceControl(
     
     return status;
 }
-
 
 #pragma warning(pop)
