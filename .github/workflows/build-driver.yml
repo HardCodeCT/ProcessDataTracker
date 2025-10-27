@@ -9,488 +9,360 @@ on:
 jobs:
   build-and-sign-driver:
     runs-on: windows-latest
-   
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Setup NuGet
-      uses: NuGet/setup-nuget@v2
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
 
-    - name: Create packages.config
-      shell: powershell
-      run: |
-        $packages = @"
-        <?xml version="1.0" encoding="utf-8"?>
-        <packages>
-          <package id="Microsoft.Windows.SDK.CPP" version="10.0.26100.6584" targetFramework="native" />
-          <package id="Microsoft.Windows.SDK.CPP.x64" version="10.0.26100.6584" targetFramework="native" />
-          <package id="Microsoft.Windows.WDK.x64" version="10.0.26100.6584" targetFramework="native" />
-        </packages>
-        "@
-        $packages | Out-File -FilePath "packages.config" -Encoding ASCII
+      - name: Create packages.config
+        shell: powershell
+        run: |
+          $packages = @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <packages>
+            <package id="Microsoft.Windows.SDK.CPP" version="10.0.26100.6584" targetFramework="native" />
+            <package id="Microsoft.Windows.SDK.CPP.x64" version="10.0.26100.6584" targetFramework="native" />
+            <package id="Microsoft.Windows.WDK.x64" version="10.0.26100.6584" targetFramework="native" />
+          </packages>
+          "@
+          $packages | Out-File -FilePath "packages.config" -Encoding ASCII
 
-    - name: Create Directory.Build.props
-      shell: powershell
-      run: |
-        $props = @'
-        <Project>
-          <Import Project="packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props" Condition="Exists('packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props') and '$(Platform)' == 'x64'"/>
-          <Import Project="packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props') and '$(Platform)' == 'x64'"/>
-          <Import Project="packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props')"/>
-        </Project>
-        '@
-        $props | Out-File -FilePath "Directory.Build.props" -Encoding ASCII
+      - name: Create Directory.Build.props
+        shell: powershell
+        run: |
+          $props = @'
+          <Project>
+            <Import Project="packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props" Condition="Exists('packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props') and '$(Platform)' == 'x64'"/>
+            <Import Project="packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props') and '$(Platform)' == 'x64'"/>
+            <Import Project="packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props')"/>
+          </Project>
+          '@
+          $props | Out-File -FilePath "Directory.Build.props" -Encoding ASCII
 
-    - name: Restore NuGet Packages
-      run: nuget restore packages.config -PackagesDirectory packages
+      - name: Restore NuGet Packages
+        run: nuget restore packages.config -PackagesDirectory packages
 
-    - name: Create INF File
-      shell: powershell
-      run: |
-        $inf = @'
-        [Version]
-        Signature="$WINDOWS NT$"
-        Class=System
-        ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
-        Provider=%ManufacturerName%
-        CatalogFile=ProcessDataTracker.cat
-        DriverVer=10/27/2025,1.0.0.0
-        PnpLockdown=1
+      - name: Create INF File
+        shell: powershell
+        run: |
+          $inf = @'
+          [Version]
+          Signature="$WINDOWS NT$"
+          Class=System
+          ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+          Provider=%ManufacturerName%
+          CatalogFile=ProcessDataTracker.cat
+          DriverVer=10/27/2025,1.0.0.0
+          PnpLockdown=1
 
-        [DestinationDirs]
-        DefaultDestDir = 12
+          [DestinationDirs]
+          DefaultDestDir = 12
 
-        [SourceDisksNames]
-        1 = %DiskName%,,,""
+          [SourceDisksNames]
+          1 = %DiskName%,,,""
 
-        [SourceDisksFiles]
-        ProcessDataTracker.sys = 1,,
+          [SourceDisksFiles]
+          ProcessDataTracker.sys = 1,,
 
-        [Manufacturer]
-        %ManufacturerName%=Standard,NTamd64
+          [Manufacturer]
+          %ManufacturerName%=Standard,NTamd64
 
-        [Standard.NTamd64]
-        %ProcessDataTracker.DeviceDesc%=ProcessDataTracker_Device, Root\ProcessDataTracker
+          [Standard.NTamd64]
+          %ProcessDataTracker.DeviceDesc%=ProcessDataTracker_Device, Root\ProcessDataTracker
 
-        [ProcessDataTracker_Device.NT]
-        CopyFiles=Drivers_Dir
+          [ProcessDataTracker_Device.NT]
+          CopyFiles=Drivers_Dir
 
-        [Drivers_Dir]
-        ProcessDataTracker.sys
+          [Drivers_Dir]
+          ProcessDataTracker.sys
 
-        [ProcessDataTracker_Device.NT.Services]
-        AddService = ProcessDataTracker,%SPSVCINST_ASSOCSERVICE%, ProcessDataTracker_Service_Inst
+          [ProcessDataTracker_Device.NT.Services]
+          AddService = ProcessDataTracker,%SPSVCINST_ASSOCSERVICE%, ProcessDataTracker_Service_Inst
 
-        [ProcessDataTracker_Service_Inst]
-        DisplayName    = %ProcessDataTracker.SVCDESC%
-        ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
-        StartType      = 3               ; SERVICE_DEMAND_START
-        ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
-        ServiceBinary  = %12%\ProcessDataTracker.sys
+          [ProcessDataTracker_Service_Inst]
+          DisplayName = %ProcessDataTracker.SVCDESC%
+          ServiceType = 1 ; SERVICE_KERNEL_DRIVER
+          StartType = 3 ; SERVICE_DEMAND_START
+          ErrorControl = 1 ; SERVICE_ERROR_NORMAL
+          ServiceBinary = %12%\ProcessDataTracker.sys
 
-        [Strings]
-        SPSVCINST_ASSOCSERVICE= 0x00000002
-        ManufacturerName="ProcessDataTracker"
-        DiskName = "ProcessDataTracker Installation Disk"
-        ProcessDataTracker.DeviceDesc = "ProcessDataTracker Driver"
-        ProcessDataTracker.SVCDESC = "ProcessDataTracker Service"
-        '@
-        $inf | Out-File -FilePath "ProcessDataTracker.inf" -Encoding ASCII
+          [Strings]
+          SPSVCINST_ASSOCSERVICE= 0x00000002
+          ManufacturerName="ProcessDataTracker"
+          DiskName = "ProcessDataTracker Installation Disk"
+          ProcessDataTracker.DeviceDesc = "ProcessDataTracker Driver"
+          ProcessDataTracker.SVCDESC = "ProcessDataTracker Service"
+          '@
+          $inf | Out-File -FilePath "ProcessDataTracker.inf" -Encoding ASCII
 
-    - name: Create vcxproj
-      shell: powershell
-      run: |
-        $vcxproj = @'
-        <?xml version="1.0" encoding="utf-8"?>
-        <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-          <ItemGroup Label="ProjectConfigurations">
-            <ProjectConfiguration Include="Release|x64">
-              <Configuration>Release</Configuration>
-              <Platform>x64</Platform>
-            </ProjectConfiguration>
-          </ItemGroup>
-          <PropertyGroup Label="Globals">
-            <VCProjectVersion>15.0</VCProjectVersion>
-            <ProjectGuid>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</ProjectGuid>
-            <Keyword>Win32Proj</Keyword>
-            <TargetPlatformVersion>10.0</TargetPlatformVersion>
-          </PropertyGroup>
-          <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-          <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-            <ConfigurationType>Driver</ConfigurationType>
-            <DriverType>WDM</DriverType>
-            <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
-            <DriverSign>false</DriverSign>
-          </PropertyGroup>
-          <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-          <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-            <ClCompile>
-              <WarningLevel>Level3</WarningLevel>
-              <Optimization>MaxSpeed</Optimization>
-              <PreprocessorDefinitions>NDIS630=1;NDIS_SUPPORT_NDIS630=1;_WIN64;_AMD64_;AMD64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-              <AdditionalOptions>/wd4201 /wd4214 /wd4100 /wd4115 /wd4127 /wd4131 %(AdditionalOptions)</AdditionalOptions>
-              <SDLCheck>false</SDLCheck>
-              <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-              <BufferSecurityCheck>true</BufferSecurityCheck>
-              <FunctionLevelLinking>true</FunctionLevelLinking>
-              <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
-              <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
-              <RuntimeTypeInfo>false</RuntimeTypeInfo>
-              <ExceptionHandling>false</ExceptionHandling>
-              <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
-            </ClCompile>
-            <Link>
-              <AdditionalDependencies>ntoskrnl.lib;hal.lib;fwpkclnt.lib;ndis.lib;%(AdditionalDependencies)</AdditionalDependencies>
-              <GenerateDebugInformation>true</GenerateDebugInformation>
-              <SubSystem>Native</SubSystem>
-              <OptimizeReferences>true</OptimizeReferences>
-              <EnableCOMDATFolding>true</EnableCOMDATFolding>
-              <EntryPointSymbol>DriverEntry</EntryPointSymbol>
-              <IncrementalLink>false</IncrementalLink>
-            </Link>
-          </ItemDefinitionGroup>
-          <ItemGroup>
-            <ClCompile Include="ProcessDataTracker.c" />
-          </ItemGroup>
-          <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-            <TargetName>ProcessDataTracker</TargetName>
-            <TargetExt>.sys</TargetExt>
-          </PropertyGroup>
-          <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-        </Project>
-        '@
-        $vcxproj | Out-File -FilePath "ProcessDataTracker.vcxproj" -Encoding ASCII
+      - name: Create vcxproj
+        shell: powershell
+        run: |
+          $vcxproj = @'
+          <?xml version="1.0" encoding="utf-8"?>
+          <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+            <ItemGroup Label="ProjectConfigurations">
+              <ProjectConfiguration Include="Release|x64">
+                <Configuration>Release</Configuration>
+                <Platform>x64</Platform>
+              </ProjectConfiguration>
+            </ItemGroup>
+            <PropertyGroup Label="Globals">
+              <VCProjectVersion>15.0</VCProjectVersion>
+              <ProjectGuid>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</ProjectGuid>
+              <Keyword>Win32Proj</Keyword>
+              <TargetPlatformVersion>10.0</TargetPlatformVersion>
+            </PropertyGroup>
+            <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+            <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+              <ConfigurationType>Driver</ConfigurationType>
+              <DriverType>WDM</DriverType>
+              <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+              <DriverSign>false</DriverSign>
+            </PropertyGroup>
+            <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+            <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+              <ClCompile>
+                <WarningLevel>Level3</WarningLevel>
+                <Optimization>MaxSpeed</Optimization>
+                <PreprocessorDefinitions>NDIS630=1;NDIS_SUPPORT_NDIS630=1;_WIN64;_AMD64_;AMD64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+                <AdditionalOptions>/wd4201 /wd4214 /wd4100 /wd4115 /wd4127 /wd4131 %(AdditionalOptions)</AdditionalOptions>
+                <SDLCheck>false</SDLCheck>
+                <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+                <BufferSecurityCheck>true</BufferSecurityCheck>
+                <FunctionLevelLinking>true</FunctionLevelLinking>
+                <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
+                <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
+                <RuntimeTypeInfo>false</RuntimeTypeInfo>
+                <ExceptionHandling>false</ExceptionHandling>
+                <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+              </ClCompile>
+              <Link>
+                <AdditionalDependencies>ntoskrnl.lib;hal.lib;fwpkclnt.lib;ndis.lib;%(AdditionalDependencies)</AdditionalDependencies>
+                <GenerateDebugInformation>true</GenerateDebugInformation>
+                <SubSystem>Native</SubSystem>
+                <OptimizeReferences>true</OptimizeReferences>
+                <EnableCOMDATFolding>true</EnableCOMDATFolding>
+                <EntryPointSymbol>DriverEntry</EntryPointSymbol>
+                <IncrementalLink>false</IncrementalLink>
+              </Link>
+            </ItemDefinitionGroup>
+            <ItemGroup>
+              <ClCompile Include="ProcessDataTracker.c" />
+            </ItemGroup>
+            <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+              <TargetName>ProcessDataTracker</TargetName>
+              <TargetExt>.sys</TargetExt>
+            </PropertyGroup>
+            <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+          </Project>
+          '@
+          $vcxproj | Out-File -FilePath "ProcessDataTracker.vcxproj" -Encoding ASCII
 
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
 
-    - name: Build Driver
-      run: msbuild ProcessDataTracker.vcxproj /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off
+      - name: Build Driver
+        run: msbuild ProcessDataTracker.vcxproj /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off
 
-    - name: Copy Driver to Working Directory
-      shell: powershell
-      run: |
-        Copy-Item "x64\Release\ProcessDataTracker.sys" -Destination ".\ProcessDataTracker.sys"
-        Write-Host "Driver copied to working directory"
+      - name: Copy Driver to Working Directory
+        shell: powershell
+        run: |
+          Copy-Item "x64\Release\ProcessDataTracker.sys" -Destination ".\ProcessDataTracker.sys"
+          Write-Host "Driver copied to working directory"
 
-    - name: Create Test Certificate
-      shell: powershell
-      run: |
-        $makecert = "packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\tools\x64\makecert.exe"
-        
-        if (Test-Path $makecert) {
+      - name: Create Test Certificate
+        shell: powershell
+        run: |
+          $makecert = "packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\tools\x64\makecert.exe"
+          if (Test-Path $makecert) {
             & $makecert -r -pe -n "CN=ProcessDataTracker Test Certificate" -ss MY -sr LocalMachine -eku 1.3.6.1.5.5.7.3.3 -len 2048 -cy end -a sha256 -m 120 -sky signature ProcessDataTrackerCert.cer
             Write-Host "Certificate created successfully"
-        } else {
+          } else {
             Write-Error "MakeCert.exe not found at expected location"
             exit 1
-        }
+          }
 
-    - name: Create Catalog File
-      shell: powershell
-      run: |
-        $inf2cat = "packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\tools\x64\inf2cat.exe"
-        
-        if (Test-Path $inf2cat) {
-            & $inf2cat /driver:. /os:10_X64,Server10_X64
-            Write-Host "Catalog file created successfully"
-        } else {
-            Write-Error "Inf2Cat.exe not found"
-            exit 1
-        }
-
-    - name: Sign Catalog File
-      shell: powershell
-      run: |
-        $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\bin\10.0.26100.0\x64\signtool.exe"
-        
-        if (Test-Path $signtool) {
-            & $signtool sign /v /sm /s MY /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com ProcessDataTracker.cat
-            
+      - name: Sign Driver File
+        shell: powershell
+        run: |
+          $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\bin\10.0.26100.0\x64\signtool.exe"
+          if (Test-Path $signtool) {
+            & $signtool sign /v /sm /s MY /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com ProcessDataTracker.sys
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "Catalog file signed successfully"
+              Write-Host "Driver file signed successfully"
             } else {
-                Write-Warning "Signing completed with warnings. This is normal for test certificates."
+              Write-Warning "Signing completed with warnings. This is normal for test certificates."
             }
-        } else {
+          } else {
             Write-Error "SignTool.exe not found"
             exit 1
-        }
+          }
 
-    - name: Export Certificate
-      shell: powershell
-      run: |
-        # Export the certificate from the certificate store
-        $cert = Get-ChildItem -Path Cert:\LocalMachine\MY | Where-Object { $_.Subject -like "*ProcessDataTracker Test Certificate*" } | Select-Object -First 1
-        
-        if ($cert) {
+      - name: Create Catalog File
+        shell: powershell
+        run: |
+          $inf2cat = "packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\tools\x64\inf2cat.exe"
+          if (Test-Path $inf2cat) {
+            & $inf2cat /driver:. /os:10_X64,Server10_X64
+            Write-Host "Catalog file created successfully"
+          } else {
+            Write-Error "Inf2Cat.exe not found"
+            exit 1
+          }
+
+      - name: Sign Catalog File
+        shell: powershell
+        run: |
+          $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\bin\10.0.26100.0\x64\signtool.exe"
+          if (Test-Path $signtool) {
+            & $signtool sign /v /sm /s MY /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com ProcessDataTracker.cat
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Catalog file signed successfully"
+            } else {
+              Write-Warning "Signing completed with warnings. This is normal for test certificates."
+            }
+          } else {
+            Write-Error "SignTool.exe not found"
+            exit 1
+          }
+
+      - name: Export Certificate
+        shell: powershell
+        run: |
+          # Export the certificate from the certificate store
+          $cert = Get-ChildItem -Path Cert:\LocalMachine\MY | Where-Object { $_.Subject -like "*ProcessDataTracker Test Certificate*" } | Select-Object -First 1
+          if ($cert) {
             $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
             [System.IO.File]::WriteAllBytes("$PWD\ProcessDataTrackerCert.cer", $certBytes)
             Write-Host "Certificate exported successfully"
-        } else {
+          } else {
             Write-Warning "Certificate not found in store, using previously created .cer file"
-        }
+          }
 
-    - name: Create Installation Script
-      shell: powershell
-      run: |
-        $installScript = @'
-        # ProcessDataTracker Driver Installation Script
-        # Run this script as Administrator
+      - name: Create Installation Script
+        shell: powershell
+        run: |
+          $installScript = @'
+          # ProcessDataTracker Driver Installation Script
+          # Run this script as Administrator
 
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host " ProcessDataTracker Driver Installer" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
+          Write-Host "========================================" -ForegroundColor Cyan
+          Write-Host " ProcessDataTracker Driver Installer" -ForegroundColor Cyan
+          Write-Host "========================================" -ForegroundColor Cyan
 
-        # Check for Administrator privileges
-        $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        if (-not $isAdmin) {
+          # Check for Administrator privileges
+          $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          if (-not $isAdmin) {
             Write-Host "ERROR: This script must be run as Administrator!" -ForegroundColor Red
             pause
             exit 1
-        }
+          }
 
-        # Get script directory
-        $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+          # Get script directory
+          $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-        # Install certificate
-        Write-Host "`nInstalling test certificate..." -ForegroundColor Yellow
-        try {
+          # Install certificate
+          Write-Host "`nInstalling test certificate..." -ForegroundColor Yellow
+          try {
             certutil.exe -addstore "Root" "$scriptDir\ProcessDataTrackerCert.cer"
             certutil.exe -addstore "TrustedPublisher" "$scriptDir\ProcessDataTrackerCert.cer"
             Write-Host "Certificate installed successfully" -ForegroundColor Green
-        } catch {
+          } catch {
             Write-Host "Failed to install certificate: $_" -ForegroundColor Red
             pause
             exit 1
-        }
+          }
 
-        # Install driver
-        Write-Host "`nInstalling driver..." -ForegroundColor Yellow
-        try {
+          # Install driver
+          Write-Host "`nInstalling driver..." -ForegroundColor Yellow
+          try {
             pnputil.exe /add-driver "$scriptDir\ProcessDataTracker.inf" /install
             Write-Host "Driver installed successfully" -ForegroundColor Green
-        } catch {
+          } catch {
             Write-Host "Failed to install driver: $_" -ForegroundColor Red
             pause
             exit 1
-        }
+          }
 
-        Write-Host "`n========================================" -ForegroundColor Cyan
-        Write-Host "Installation completed successfully!" -ForegroundColor Green
-        Write-Host "========================================" -ForegroundColor Cyan
-        pause
-        '@
-        $installScript | Out-File -FilePath "Install-Driver.ps1" -Encoding UTF8
+          Write-Host "`n========================================" -ForegroundColor Cyan
+          Write-Host "Installation completed successfully!" -ForegroundColor Green
+          Write-Host "========================================" -ForegroundColor Cyan
+          pause
+          '@
+          $installScript | Out-File -FilePath "Install-Driver.ps1" -Encoding UTF8
 
-    - name: Create Uninstallation Script
-      shell: powershell
-      run: |
-        $uninstallScript = @'
-        # ProcessDataTracker Driver Uninstallation Script
-        # Run this script as Administrator
+      - name: Create Uninstallation Script
+        shell: powershell
+        run: |
+          $uninstallScript = @'
+          # ProcessDataTracker Driver Uninstallation Script
+          # Run this script as Administrator
 
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host " ProcessDataTracker Driver Uninstaller" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
+          Write-Host "========================================" -ForegroundColor Cyan
+          Write-Host " ProcessDataTracker Driver Uninstaller" -ForegroundColor Cyan
+          Write-Host "========================================" -ForegroundColor Cyan
 
-        # Check for Administrator privileges
-        $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        if (-not $isAdmin) {
+          # Check for Administrator privileges
+          $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          if (-not $isAdmin) {
             Write-Host "ERROR: This script must be run as Administrator!" -ForegroundColor Red
             pause
             exit 1
-        }
+          }
 
-        # Get script directory
-        $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+          # Get script directory
+          $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-        # Uninstall driver
-        Write-Host "`nUninstalling driver..." -ForegroundColor Yellow
-        try {
+          # Uninstall driver
+          Write-Host "`nUninstalling driver..." -ForegroundColor Yellow
+          try {
             pnputil.exe /delete-driver ProcessDataTracker.inf /uninstall /force
             Write-Host "Driver uninstalled successfully" -ForegroundColor Green
-        } catch {
+          } catch {
             Write-Host "Failed to uninstall driver: $_" -ForegroundColor Red
-        }
+          }
 
-        # Remove certificate
-        Write-Host "`nRemoving test certificate..." -ForegroundColor Yellow
-        try {
+          # Remove certificate
+          Write-Host "`nRemoving test certificate..." -ForegroundColor Yellow
+          try {
             certutil.exe -delstore "Root" "ProcessDataTracker Test Certificate"
             certutil.exe -delstore "TrustedPublisher" "ProcessDataTracker Test Certificate"
             Write-Host "Certificate removed successfully" -ForegroundColor Green
-        } catch {
+          } catch {
             Write-Host "Failed to remove certificate: $_" -ForegroundColor Red
-        }
+          }
 
-        Write-Host "`n========================================" -ForegroundColor Cyan
-        Write-Host "Uninstallation completed!" -ForegroundColor Green
-        Write-Host "========================================" -ForegroundColor Cyan
-        pause
-        '@
-        $uninstallScript | Out-File -FilePath "Uninstall-Driver.ps1" -Encoding UTF8
+          Write-Host "`n========================================" -ForegroundColor Cyan
+          Write-Host "Uninstallation completed!" -ForegroundColor Green
+          Write-Host "========================================" -ForegroundColor Cyan
+          pause
+          '@
+          $uninstallScript | Out-File -FilePath "Uninstall-Driver.ps1" -Encoding UTF8
 
-    - name: Create README
-      shell: powershell
-      run: |
-        $readme = @'
-        # ProcessDataTracker Driver Package
+      - name: Create README
+        shell: powershell
+        run: |
+          $readme = @'
+          # ProcessDataTracker Driver Package
 
-        ## Contents
-        - `ProcessDataTracker.sys` - The driver file
-        - `ProcessDataTracker.inf` - Driver installation information
-        - `ProcessDataTracker.cat` - Signed catalog file
-        - `ProcessDataTrackerCert.cer` - Test certificate
-        - `Install-Driver.ps1` - Installation script
-        - `Uninstall-Driver.ps1` - Uninstallation script
+          ## Contents
+          - `ProcessDataTracker.sys` - The driver file
+          - `ProcessDataTracker.inf` - Driver installation information
+          - `ProcessDataTracker.cat` - Signed catalog file
+          - `ProcessDataTrackerCert.cer` - Test certificate
+          - `Install-Driver.ps1` - Installation script
+          - `Uninstall-Driver.ps1` - Uninstallation script
 
-        ## Installation Instructions
+          ## Installation Instructions
 
-        ### Option 1: Using PowerShell Script (Recommended)
-        1. Extract all files to a folder
-        2. Right-click `Install-Driver.ps1` and select "Run with PowerShell"
-        3. If prompted, choose "Run anyway" or adjust execution policy
-        4. The script will install the certificate and driver automatically
+          ### Option 1: Using PowerShell Script (Recommended)
+          1. Extract all files to a folder
+          2. Right-click `Install-Driver.ps1` and select "Run with PowerShell"
+          3. If prompted, choose "Run anyway" or adjust execution policy
+          4. The script will install the certificate and driver automatically
 
-        ### Option 2: Manual Installation
-        1. Install the certificate:
-           ```
-           certutil.exe -addstore "Root" ProcessDataTrackerCert.cer
-           certutil.exe -addstore "TrustedPublisher" ProcessDataTrackerCert.cer
-           ```
-        2. Install the driver:
-           ```
-           pnputil.exe /add-driver ProcessDataTracker.inf /install
-           ```
-
-        ## Uninstallation
-
-        Run `Uninstall-Driver.ps1` as Administrator to remove the driver and certificate.
-
-        ## Important Notes
-
-        - This driver is signed with a TEST certificate
-        - The certificate is only valid for testing purposes
-        - For production use, obtain a proper code signing certificate from a trusted CA
-        - You may need to enable test signing mode on Windows:
-          ```
-          bcdedit /set testsigning on
-          ```
-          Then restart your computer
-
-        ## Troubleshooting
-
-        If you encounter "Windows cannot verify the digital signature" error:
-        1. Ensure the certificate is installed in both Root and TrustedPublisher stores
-        2. Enable test signing mode (see above)
-        3. Disable driver signature enforcement temporarily (not recommended for production)
-
-        ## Support
-
-        For issues or questions, please check the project repository.
-        '@
-        $readme | Out-File -FilePath "README.md" -Encoding UTF8
-
-    - name: Verify Files
-      shell: powershell
-      run: |
-        Write-Host "`nVerifying generated files..." -ForegroundColor Cyan
-        
-        $requiredFiles = @(
-            "ProcessDataTracker.sys",
-            "ProcessDataTracker.inf",
-            "ProcessDataTracker.cat",
-            "ProcessDataTrackerCert.cer",
-            "Install-Driver.ps1",
-            "Uninstall-Driver.ps1",
-            "README.md"
-        )
-        
-        $allFilesExist = $true
-        foreach ($file in $requiredFiles) {
-            if (Test-Path $file) {
-                $fileInfo = Get-Item $file
-                Write-Host "✓ $file ($([math]::Round($fileInfo.Length/1KB, 2)) KB)" -ForegroundColor Green
-            } else {
-                Write-Host "✗ $file - MISSING" -ForegroundColor Red
-                $allFilesExist = $false
-            }
-        }
-        
-        if (-not $allFilesExist) {
-            Write-Host "`nERROR: Some required files are missing!" -ForegroundColor Red
-            exit 1
-        }
-
-    - name: Create Driver Package
-      shell: powershell
-      run: |
-        # Create a zip package with all necessary files
-        $files = @(
-            "ProcessDataTracker.sys",
-            "ProcessDataTracker.inf",
-            "ProcessDataTracker.cat",
-            "ProcessDataTrackerCert.cer",
-            "Install-Driver.ps1",
-            "Uninstall-Driver.ps1",
-            "README.md"
-        )
-        
-        Compress-Archive -Path $files -DestinationPath "ProcessDataTracker-Package.zip" -Force
-        Write-Host "Driver package created: ProcessDataTracker-Package.zip" -ForegroundColor Green
-
-    - name: Upload Complete Driver Package
-      uses: actions/upload-artifact@v4
-      with:
-        name: ProcessDataTracker-Complete-Package
-        path: ProcessDataTracker-Package.zip
-        if-no-files-found: error
-
-    - name: Upload Individual Files
-      uses: actions/upload-artifact@v4
-      with:
-        name: ProcessDataTracker-Files
-        path: |
-          ProcessDataTracker.sys
-          ProcessDataTracker.inf
-          ProcessDataTracker.cat
-          ProcessDataTrackerCert.cer
-          Install-Driver.ps1
-          Uninstall-Driver.ps1
-          README.md
-        if-no-files-found: error
-
-    - name: Build Summary
-      if: always()
-      shell: powershell
-      run: |
-        Write-Host "`n========================================" -ForegroundColor Cyan
-        Write-Host " BUILD SUMMARY" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-       
-        if (Test-Path "ProcessDataTracker.sys") {
-            Write-Host "✓ Status: SUCCESS" -ForegroundColor Green
-            Write-Host "`n📦 Package Contents:" -ForegroundColor Yellow
-            Write-Host "  • ProcessDataTracker.sys (Driver)" -ForegroundColor White
-            Write-Host "  • ProcessDataTracker.inf (Installation Info)" -ForegroundColor White
-            Write-Host "  • ProcessDataTracker.cat (Signed Catalog)" -ForegroundColor White
-            Write-Host "  • ProcessDataTrackerCert.cer (Test Certificate)" -ForegroundColor White
-            Write-Host "  • Install-Driver.ps1 (Installation Script)" -ForegroundColor White
-            Write-Host "  • Uninstall-Driver.ps1 (Uninstallation Script)" -ForegroundColor White
-            Write-Host "  • README.md (Documentation)" -ForegroundColor White
-            Write-Host "`n📥 Download:" -ForegroundColor Yellow
-            Write-Host "  • ProcessDataTracker-Complete-Package.zip (All files)" -ForegroundColor White
-            Write-Host "  • ProcessDataTracker-Files (Individual files)" -ForegroundColor White
-            Write-Host "`n⚠️  Important Notes:" -ForegroundColor Yellow
-            Write-Host "  • Driver is signed with a TEST certificate" -ForegroundColor White
-            Write-Host "  • Run Install-Driver.ps1 as Administrator" -ForegroundColor White
-            Write-Host "  • You may need to enable test signing mode" -ForegroundColor White
-            Write-Host "  • See README.md for detailed instructions" -ForegroundColor White
-        } else {
-            Write-Host "✗ Status: FAILED" -ForegroundColor Red
-            Write-Host "✗ Driver file not generated" -ForegroundColor Red
-        }
-       
-        Write-Host "========================================`n" -ForegroundColor Cyan
+          ### Option 2: Manual Installation
+          1. Install the certificate:
