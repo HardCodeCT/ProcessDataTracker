@@ -176,21 +176,15 @@ jobs:
       - name: Create Test Certificate
         shell: powershell
         run: |
-          $makecert = "packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\tools\x64\makecert.exe"
-          if (Test-Path $makecert) {
-            & $makecert -r -pe -n "CN=ProcessDataTracker Test Certificate" -ss MY -sr LocalMachine -eku 1.3.6.1.5.5.7.3.3 -len 2048 -cy end -a sha256 -m 120 -sky signature ProcessDataTrackerCert.cer
-            Write-Host "Certificate created successfully"
-          } else {
-            Write-Error "MakeCert.exe not found at expected location"
-            exit 1
-          }
+          New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=ProcessDataTracker Test Certificate" -KeyExportPolicy Exportable -CertStoreLocation "Cert:\LocalMachine\My" -KeyLength 2048 -HashAlgorithm sha256 -NotAfter (Get-Date).AddMonths(120) -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider"
+          Write-Host "Certificate created successfully"
 
       - name: Sign Driver File
         shell: powershell
         run: |
           $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\bin\10.0.26100.0\x64\signtool.exe"
           if (Test-Path $signtool) {
-            & $signtool sign /v /sm /s MY /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com ProcessDataTracker.sys
+            & $signtool sign /v /s My /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com /sm ProcessDataTracker.sys
             if ($LASTEXITCODE -eq 0) {
               Write-Host "Driver file signed successfully"
             } else {
@@ -218,7 +212,7 @@ jobs:
         run: |
           $signtool = "packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\bin\10.0.26100.0\x64\signtool.exe"
           if (Test-Path $signtool) {
-            & $signtool sign /v /sm /s MY /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com ProcessDataTracker.cat
+            & $signtool sign /v /s My /n "ProcessDataTracker Test Certificate" /fd SHA256 /t http://timestamp.digicert.com /sm ProcessDataTracker.cat
             if ($LASTEXITCODE -eq 0) {
               Write-Host "Catalog file signed successfully"
             } else {
@@ -233,13 +227,14 @@ jobs:
         shell: powershell
         run: |
           # Export the certificate from the certificate store
-          $cert = Get-ChildItem -Path Cert:\LocalMachine\MY | Where-Object { $_.Subject -like "*ProcessDataTracker Test Certificate*" } | Select-Object -First 1
+          $cert = Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object { $_.Subject -like "*ProcessDataTracker Test Certificate*" } | Select-Object -First 1
           if ($cert) {
             $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
             [System.IO.File]::WriteAllBytes("$PWD\ProcessDataTrackerCert.cer", $certBytes)
             Write-Host "Certificate exported successfully"
           } else {
-            Write-Warning "Certificate not found in store, using previously created .cer file"
+            Write-Error "Certificate not found in store"
+            exit 1
           }
 
       - name: Create Installation Script
@@ -328,9 +323,14 @@ jobs:
           # Remove certificate
           Write-Host "`nRemoving test certificate..." -ForegroundColor Yellow
           try {
-            certutil.exe -delstore "Root" "ProcessDataTracker Test Certificate"
-            certutil.exe -delstore "TrustedPublisher" "ProcessDataTracker Test Certificate"
-            Write-Host "Certificate removed successfully" -ForegroundColor Green
+            $certThumbprint = (Get-ChildItem -Path Cert:\LocalMachine\Root | Where-Object { $_.Subject -like "*ProcessDataTracker Test Certificate*" }).Thumbprint
+            if ($certThumbprint) {
+              certutil.exe -delstore "Root" $certThumbprint
+              certutil.exe -delstore "TrustedPublisher" $certThumbprint
+              Write-Host "Certificate removed successfully" -ForegroundColor Green
+            } else {
+              Write-Host "Certificate not found for removal" -ForegroundColor Yellow
+            }
           } catch {
             Write-Host "Failed to remove certificate: $_" -ForegroundColor Red
           }
