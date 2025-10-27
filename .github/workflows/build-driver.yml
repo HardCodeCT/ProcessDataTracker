@@ -20,29 +20,29 @@ jobs:
         $packages = @"
         <?xml version="1.0" encoding="utf-8"?>
         <packages>
-          <package id="Microsoft.Windows.SDK.CPP" version="10.0.26100.2454" targetFramework="native" />
-          <package id="Microsoft.Windows.SDK.CPP.x64" version="10.0.26100.2454" targetFramework="native" />
-          <package id="Microsoft.Windows.WDK.x64" version="10.0.26100.2454" targetFramework="native" />
+          <package id="Microsoft.Windows.SDK.CPP" version="10.0.26100.6584" targetFramework="native" />
+          <package id="Microsoft.Windows.SDK.CPP.x64" version="10.0.26100.6584" targetFramework="native" />
+          <package id="Microsoft.Windows.WDK.x64" version="10.0.26100.6584" targetFramework="native" />
         </packages>
         "@
         $packages | Out-File -FilePath "packages.config" -Encoding ASCII
     - name: Create Directory.Build.props
       shell: powershell
       run: |
-        $props = @"
+        $props = @'
         <Project>
-        <Import Project="packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\build\native\Microsoft.Windows.WDK.x64.props" Condition="Exists('packages\Microsoft.Windows.WDK.x64.10.0.26100.2454\build\native\Microsoft.Windows.WDK.x64.props') and '$(Platform)' == 'x64'"/>
-        <Import Project="packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.2454\build\native\Microsoft.Windows.SDK.cpp.x64.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.2454\build\native\Microsoft.Windows.SDK.cpp.x64.props') and '$(Platform)' == 'x64'"/>
-        <Import Project="packages\Microsoft.Windows.SDK.CPP.10.0.26100.2454\build\native\Microsoft.Windows.SDK.cpp.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.10.0.26100.2454\build\native\Microsoft.Windows.SDK.cpp.props')"/>
+        <Import Project="packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props" Condition="Exists('packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props') and '$(Platform)' == 'x64'"/>
+        <Import Project="packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props') and '$(Platform)' == 'x64'"/>
+        <Import Project="packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props')"/>
         </Project>
-        "@
+        '@
         $props | Out-File -FilePath "Directory.Build.props" -Encoding ASCII
     - name: Restore NuGet Packages
       run: nuget restore packages.config -PackagesDirectory packages
     - name: Create vcxproj
       shell: powershell
       run: |
-        $vcxproj = @"
+        $vcxproj = @'
         <?xml version="1.0" encoding="utf-8"?>
         <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
           <ItemGroup Label="ProjectConfigurations">
@@ -97,7 +97,7 @@ jobs:
           </PropertyGroup>
           <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
         </Project>
-        "@
+        '@
         $vcxproj | Out-File -FilePath "processdatasaver.vcxproj" -Encoding ASCII
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
