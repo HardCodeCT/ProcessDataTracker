@@ -18,55 +18,174 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
     
-    - name: Install Windows SDK
+    - name: Download and Install WDK
       shell: powershell
       run: |
-        Write-Host "Downloading Windows SDK..."
-        $sdkUrl = "https://go.microsoft.com/fwlink/?linkid=2272610"
-        Invoke-WebRequest -Uri $sdkUrl -OutFile "$env:TEMP\sdksetup.exe"
+        Write-Host "=== Installing Windows Driver Kit ==="
         
-        Write-Host "Installing Windows SDK (this may take 5-10 minutes)..."
-        Start-Process -Wait -FilePath "$env:TEMP\sdksetup.exe" -ArgumentList "/quiet", "/norestart", "/features", "OptionId.WindowsDesktopDebuggers"
+        # Create temp directory
+        $tempDir = "$env:TEMP\wdk_install"
+        New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
         
-        Write-Host "Windows SDK installed successfully"
+        # Download WDK
+        Write-Host "Downloading WDK installer..."
+        $wdkUrl = "https://go.microsoft.com/fwlink/?linkid=2249371"
+        $wdkInstaller = "$tempDir\wdksetup.exe"
+        
+        try {
+            Invoke-WebRequest -Uri $wdkUrl -OutFile $wdkInstaller -UseBasicParsing
+            Write-Host "WDK installer downloaded successfully"
+        } catch {
+            Write-Host "Error downloading WDK: $_"
+            exit 1
+        }
+        
+        # Install WDK
+        Write-Host "Installing WDK (this takes 10-15 minutes)..."
+        Write-Host "Please wait..."
+        
+        $process = Start-Process -FilePath $wdkInstaller -ArgumentList "/quiet", "/norestart", "/ceip off" -Wait -PassThru
+        
+        if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+            Write-Host "WDK installation completed successfully (Exit code: $($process.ExitCode))"
+        } else {
+            Write-Host "WDK installation failed with exit code: $($process.ExitCode)"
+            exit 1
+        }
+        
+        # Verify installation
+        $wdkPath = "C:\Program Files (x86)\Windows Kits\10"
+        if (Test-Path $wdkPath) {
+            Write-Host "✓ WDK found at: $wdkPath"
+            
+            # Find SDK version
+            $includePath = Join-Path $wdkPath "Include"
+            if (Test-Path $includePath) {
+                $versions = Get-ChildItem $includePath -Directory | Where-Object { $_.Name -match "10\.0\.\d+" } | Sort-Object Name -Descending
+                if ($versions) {
+                    Write-Host "✓ Available SDK versions:"
+                    foreach ($ver in $versions) {
+                        Write-Host "  - $($ver.Name)"
+                        $kmPath = Join-Path $ver.FullName "km\ntddk.h"
+                        if (Test-Path $kmPath) {
+                            Write-Host "    ✓ ntddk.h found"
+                        }
+                    }
+                }
+            }
+        } else {
+            Write-Host "✗ WDK not found at expected location"
+            exit 1
+        }
+        
+        Write-Host "=== WDK Installation Complete ==="
     
-    - name: Install WDK
+    - name: Detect WDK Version and Build Driver
       shell: powershell
       run: |
-        Write-Host "Downloading WDK..."
-        $wdkUrl = "https://go.microsoft.com/fwlink/?linkid=2272610"
-        Invoke-WebRequest -Uri $wdkUrl -OutFile "$env:TEMP\wdksetup.exe"
+        Write-Host "=== Building Driver ==="
         
-        Write-Host "Installing WDK (this may take 10-15 minutes)..."
-        Start-Process -Wait -FilePath "$env:TEMP\wdksetup.exe" -ArgumentList "/quiet", "/norestart"
+        # Find WDK installation
+        $wdkPath = "C:\Program Files (x86)\Windows Kits\10"
+        if (-not (Test-Path $wdkPath)) {
+            Write-Host "ERROR: WDK not found at $wdkPath"
+            exit 1
+        }
         
-        Write-Host "WDK installed successfully"
-    
-    - name: Build Driver (x64)
-      shell: cmd
-      run: |
-        echo Building ProcessDataTracker driver...
+        # Find latest SDK version
+        $includePath = Join-Path $wdkPath "Include"
+        $sdkVersions = Get-ChildItem $includePath -Directory | Where-Object { $_.Name -match "10\.0\.\d+\.\d+" } | Sort-Object Name -Descending
         
-        set WDK_PATH=C:\Program Files (x86)\Windows Kits\10
-        set SDK_VERSION=10.0.22621.0
+        if (-not $sdkVersions) {
+            Write-Host "ERROR: No SDK versions found"
+            exit 1
+        }
         
-        REM Set up build environment
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        $sdkVersion = $sdkVersions[0].Name
+        Write-Host "Using SDK version: $sdkVersion"
         
-        REM Include paths
-        set INCLUDE_PATHS=/I"%WDK_PATH%\Include\%SDK_VERSION%\km" /I"%WDK_PATH%\Include\%SDK_VERSION%\shared" /I"%WDK_PATH%\Include\%SDK_VERSION%\um"
+        # Verify paths
+        $kmInclude = Join-Path $wdkPath "Include\$sdkVersion\km"
+        $sharedInclude = Join-Path $wdkPath "Include\$sdkVersion\shared"
+        $umInclude = Join-Path $wdkPath "Include\$sdkVersion\um"
+        $libPath = Join-Path $wdkPath "Lib\$sdkVersion\km\x64"
         
-        REM Library paths
-        set LIB_PATHS=/LIBPATH:"%WDK_PATH%\Lib\%SDK_VERSION%\km\x64"
+        Write-Host "Verifying paths..."
+        Write-Host "  KM Include: $kmInclude - $(Test-Path $kmInclude)"
+        Write-Host "  Shared Include: $sharedInclude - $(Test-Path $sharedInclude)"
+        Write-Host "  UM Include: $umInclude - $(Test-Path $umInclude)"
+        Write-Host "  Lib Path: $libPath - $(Test-Path $libPath)"
         
-        REM Compile the driver
-        cl.exe /c /nologo /W3 /WX- /O2 /Oi /GL /D NDEBUG /D _WIN64 /D _AMD64_ /D AMD64 /D _KERNEL_MODE /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /GR- /Fo"ProcessDataTracker.obj" /Fd"ProcessDataTracker.pdb" /kernel /Gd /wd4201 /wd4214 /wd4100 %INCLUDE_PATHS% ProcessDataTracker.c
+        # Check for ntddk.h
+        $ntddkPath = Join-Path $kmInclude "ntddk.h"
+        if (Test-Path $ntddkPath) {
+            Write-Host "✓ ntddk.h found at: $ntddkPath"
+        } else {
+            Write-Host "✗ ntddk.h not found!"
+            exit 1
+        }
         
-        REM Link the driver
-        link.exe /DRIVER /KERNEL /NOLOGO /OUT:"ProcessDataTracker.sys" /SUBSYSTEM:NATIVE /DYNAMICBASE:NO /NODEFAULTLIB /ENTRY:DriverEntry /RELEASE /INCREMENTAL:NO /OPT:REF /OPT:ICF /LTCG %LIB_PATHS% ntoskrnl.lib hal.lib wdmsec.lib fwpkclnt.lib ProcessDataTracker.obj
+        # Create build script
+        $buildScript = @"
+@echo off
+echo Building ProcessDataTracker driver...
+
+set WDK_PATH=$wdkPath
+set SDK_VERSION=$sdkVersion
+
+REM Set up Visual Studio environment
+call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+
+REM Include paths
+set INCLUDE_PATHS=/I"%WDK_PATH%\Include\%SDK_VERSION%\km" /I"%WDK_PATH%\Include\%SDK_VERSION%\shared" /I"%WDK_PATH%\Include\%SDK_VERSION%\um"
+
+REM Library paths
+set LIB_PATHS=/LIBPATH:"%WDK_PATH%\Lib\%SDK_VERSION%\km\x64"
+
+echo.
+echo Compiling driver...
+cl.exe /c /nologo /W3 /WX- /O2 /Oi /GL /D NDEBUG /D _WIN64 /D _AMD64_ /D AMD64 /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /GR- /Fo"ProcessDataTracker.obj" /Fd"ProcessDataTracker.pdb" /kernel /Gd /wd4201 /wd4214 /wd4100 /wd4117 %INCLUDE_PATHS% ProcessDataTracker.c
+
+if errorlevel 1 (
+    echo Compilation failed!
+    exit /b 1
+)
+
+echo.
+echo Linking driver...
+link.exe /DRIVER /KERNEL /NOLOGO /OUT:"ProcessDataTracker.sys" /SUBSYSTEM:NATIVE /DYNAMICBASE:NO /NODEFAULTLIB /ENTRY:DriverEntry /RELEASE /INCREMENTAL:NO /OPT:REF /OPT:ICF /LTCG %LIB_PATHS% ntoskrnl.lib hal.lib wdmsec.lib fwpkclnt.lib ProcessDataTracker.obj
+
+if errorlevel 1 (
+    echo Linking failed!
+    exit /b 1
+)
+
+echo.
+echo Build completed successfully!
+dir ProcessDataTracker.sys
+"@
         
-        echo Build completed!
-        dir *.sys
+        $buildScript | Out-File -FilePath "build.bat" -Encoding ASCII
+        
+        # Run build
+        Write-Host "`n=== Running Build ==="
+        cmd /c build.bat
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Build failed with exit code: $LASTEXITCODE"
+            exit 1
+        }
+        
+        # Verify output
+        if (Test-Path "ProcessDataTracker.sys") {
+            $fileInfo = Get-Item "ProcessDataTracker.sys"
+            Write-Host "`n✓ Driver built successfully!"
+            Write-Host "  File: ProcessDataTracker.sys"
+            Write-Host "  Size: $($fileInfo.Length) bytes"
+        } else {
+            Write-Host "`n✗ Driver file not found after build"
+            exit 1
+        }
     
     - name: Upload Driver Artifact (x64)
       uses: actions/upload-artifact@v4
@@ -75,54 +194,18 @@ jobs:
         path: ProcessDataTracker.sys
         if-no-files-found: error
     
-    - name: Build Driver (x86) - Optional
-      shell: cmd
-      continue-on-error: true
-      run: |
-        echo Building ProcessDataTracker driver for x86...
-        
-        set WDK_PATH=C:\Program Files (x86)\Windows Kits\10
-        set SDK_VERSION=10.0.22621.0
-        
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
-        
-        set INCLUDE_PATHS=/I"%WDK_PATH%\Include\%SDK_VERSION%\km" /I"%WDK_PATH%\Include\%SDK_VERSION%\shared" /I"%WDK_PATH%\Include\%SDK_VERSION%\um"
-        set LIB_PATHS=/LIBPATH:"%WDK_PATH%\Lib\%SDK_VERSION%\km\x86"
-        
-        cl.exe /c /nologo /W3 /WX- /O2 /Oi /GL /D NDEBUG /D _X86_ /D i386 /D _KERNEL_MODE /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /GR- /Fo"ProcessDataTracker_x86.obj" /Fd"ProcessDataTracker_x86.pdb" /kernel /Gd /wd4201 /wd4214 /wd4100 %INCLUDE_PATHS% ProcessDataTracker.c
-        
-        link.exe /DRIVER /KERNEL /NOLOGO /OUT:"ProcessDataTracker_x86.sys" /SUBSYSTEM:NATIVE /DYNAMICBASE:NO /NODEFAULTLIB /ENTRY:DriverEntry /RELEASE /INCREMENTAL:NO /OPT:REF /OPT:ICF /LTCG %LIB_PATHS% ntoskrnl.lib hal.lib wdmsec.lib fwpkclnt.lib ProcessDataTracker_x86.obj
-    
-    - name: Upload Driver Artifact (x86) - Optional
-      uses: actions/upload-artifact@v4
-      continue-on-error: true
-      with:
-        name: ProcessDataTracker-x86
-        path: ProcessDataTracker_x86.sys
-        if-no-files-found: warn
-    
     - name: Build Summary
       shell: powershell
       run: |
-        Write-Host "===== BUILD SUMMARY ====="
-        Write-Host ""
+        Write-Host "`n===== BUILD SUMMARY ====="
         if (Test-Path "ProcessDataTracker.sys") {
           $fileInfo = Get-Item "ProcessDataTracker.sys"
           Write-Host "✓ x64 Driver built successfully"
           Write-Host "  File: ProcessDataTracker.sys"
-          Write-Host "  Size: $($fileInfo.Length) bytes"
+          Write-Host "  Size: $($fileInfo.Length) bytes ($([math]::Round($fileInfo.Length/1KB, 2)) KB)"
+          Write-Host "`n📦 Download the artifact from the 'Artifacts' section below"
         } else {
-          Write-Host "✗ x64 Driver build failed"
+          Write-Host "✗ Build failed - no driver file generated"
+          exit 1
         }
-        Write-Host ""
-        if (Test-Path "ProcessDataTracker_x86.sys") {
-          $fileInfo = Get-Item "ProcessDataTracker_x86.sys"
-          Write-Host "✓ x86 Driver built successfully"
-          Write-Host "  File: ProcessDataTracker_x86.sys"
-          Write-Host "  Size: $($fileInfo.Length) bytes"
-        } else {
-          Write-Host "⚠ x86 Driver build skipped or failed"
-        }
-        Write-Host ""
-        Write-Host "Download artifacts from the Actions tab above"
         Write-Host "========================="
