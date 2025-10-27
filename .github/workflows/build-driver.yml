@@ -5,6 +5,7 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+
 jobs:
   build-driver:
     runs-on: windows-latest
@@ -12,8 +13,10 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
+
     - name: Setup NuGet
       uses: NuGet/setup-nuget@v2
+
     - name: Create packages.config
       shell: powershell
       run: |
@@ -26,19 +29,22 @@ jobs:
         </packages>
         "@
         $packages | Out-File -FilePath "packages.config" -Encoding ASCII
+
     - name: Create Directory.Build.props
       shell: powershell
       run: |
         $props = @'
         <Project>
-        <Import Project="packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props" Condition="Exists('packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props') and '$(Platform)' == 'x64'"/>
-        <Import Project="packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props') and '$(Platform)' == 'x64'"/>
-        <Import Project="packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props')"/>
+          <Import Project="packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props" Condition="Exists('packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props') and '$(Platform)' == 'x64'"/>
+          <Import Project="packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props') and '$(Platform)' == 'x64'"/>
+          <Import Project="packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props" Condition="Exists('packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props')"/>
         </Project>
         '@
         $props | Out-File -FilePath "Directory.Build.props" -Encoding ASCII
+
     - name: Restore NuGet Packages
       run: nuget restore packages.config -PackagesDirectory packages
+
     - name: Create vcxproj
       shell: powershell
       run: |
@@ -55,14 +61,12 @@ jobs:
             <VCProjectVersion>15.0</VCProjectVersion>
             <ProjectGuid>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</ProjectGuid>
             <Keyword>Win32Proj</Keyword>
-            <KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>
-            <KMDF_VERSION_MINOR>33</KMDF_VERSION_MINOR>
             <TargetPlatformVersion>10.0</TargetPlatformVersion>
           </PropertyGroup>
           <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
           <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
             <ConfigurationType>Driver</ConfigurationType>
-            <DriverType>KMDF</DriverType>
+            <DriverType>WDM</DriverType>
             <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
           </PropertyGroup>
           <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -70,7 +74,8 @@ jobs:
             <ClCompile>
               <WarningLevel>Level3</WarningLevel>
               <Optimization>MaxSpeed</Optimization>
-              <AdditionalOptions>/D _WIN64 /D _AMD64_ /D AMD64 /wd4201 /wd4214 /wd4100 /wd4115 /wd4127 /wd4131 %(AdditionalOptions)</AdditionalOptions>
+              <PreprocessorDefinitions>NDIS630=1;NDIS_SUPPORT_NDIS630=1;_WIN64;_AMD64_;AMD64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+              <AdditionalOptions>/wd4201 /wd4214 /wd4100 /wd4115 /wd4127 /wd4131 %(AdditionalOptions)</AdditionalOptions>
               <SDLCheck>false</SDLCheck>
               <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
               <BufferSecurityCheck>true</BufferSecurityCheck>
@@ -82,7 +87,7 @@ jobs:
               <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
             </ClCompile>
             <Link>
-              <AdditionalDependencies>ntoskrnl.lib;hal.lib;fwpkclnt.lib;wdmsec.lib;%(AdditionalDependencies)</AdditionalDependencies>
+              <AdditionalDependencies>ntoskrnl.lib;hal.lib;fwpkclnt.lib;ndis.lib;%(AdditionalDependencies)</AdditionalDependencies>
               <GenerateDebugInformation>true</GenerateDebugInformation>
               <SubSystem>Native</SubSystem>
               <OptimizeReferences>true</OptimizeReferences>
@@ -102,16 +107,20 @@ jobs:
         </Project>
         '@
         $vcxproj | Out-File -FilePath "ProcessDataTracker.vcxproj" -Encoding ASCII
+
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
+
     - name: Build Driver
       run: msbuild ProcessDataTracker.vcxproj /p:Configuration=Release /p:Platform=x64
+
     - name: Upload Driver Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ProcessDataTracker-x64
         path: x64/Release/ProcessDataTracker.sys
         if-no-files-found: error
+
     - name: Build Summary
       if: always()
       shell: powershell
