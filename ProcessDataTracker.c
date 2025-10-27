@@ -1,5 +1,6 @@
 #include <ntddk.h>
 #include <wdf.h>
+#include <ndis.h>
 #include <fwpsk.h>
 #include <fwpmk.h>
 #include <initguid.h>
@@ -249,7 +250,7 @@ NTSTATUS RegisterCallouts(PDEVICE_OBJECT deviceObject)
     
     status = FwpsCalloutRegister0(deviceObject, &callout, &g_CalloutIdOutboundV4);
     if (!NT_SUCCESS(status)) {
-        DbgPrint("ProcessDataTracker: Failed to register outbound V4 callout: 0x%X\n", status);
+        DbgPrint("ProcessDataTraacker: Failed to register outbound V4 callout: 0x%X\n", status);
         return status;
     }
     
@@ -571,5 +572,6 @@ NTSTATUS DeviceControl(
     
     return status;
 }
+
 
 #pragma warning(pop)
